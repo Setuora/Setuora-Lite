@@ -14,6 +14,7 @@ from app.models import Batch, BatchItem, BatchStatus, BatchType, Product, ScanLo
 from app.services.change_audit import record_change
 from app.services.expiry import parse_optional_date
 from app.services.inventory import InventoryError, create_batch, generate_serials, log_inventory_transaction, normalize_serial
+from app.services.master_sync import MasterSyncError, enqueue_batch_submitted_event
 
 
 MAX_ASSIGNMENT_QUANTITY = 5000
@@ -213,8 +214,20 @@ def assign_barcodes_to_existing_stock(
             )
         batch.status = BatchStatus.CLOSED.value
         batch.submitted_at = batch.created_at
-        batch.synced_at = batch.created_at
+        from app.config import get_settings
+
+        if get_settings().app_mode == "lite":
+            # QR generation remains a Lite-only operation.  Master receives
+            # the resulting serial state through the durable event outbox.
+            db.flush()
+            enqueue_batch_submitted_event(db, batch, user=user)
+            batch.synced_at = None
+        else:
+            batch.synced_at = batch.created_at
         db.commit()
+    except MasterSyncError as exc:
+        db.rollback()
+        raise InventoryError(str(exc)) from exc
     except Exception:
         db.rollback()
         raise

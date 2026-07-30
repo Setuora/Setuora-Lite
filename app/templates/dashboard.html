@@ -23,8 +23,8 @@
   <div class="metric"><span>In stock</span><strong data-metric="in_stock">{{ counts.in_stock }}</strong></div>
   <div class="metric"><span>Sold</span><strong data-metric="sold">{{ counts.sold }}</strong></div>
   <div class="metric"><span>Today scans</span><strong data-metric="today_scans">{{ counts.today_scans }}</strong></div>
-  <div class="metric warn"><span>Pending sync</span><strong data-metric="pending_sync">{{ counts.pending_sync }}</strong></div>
-  <div class="metric danger"><span>Failed sync</span><strong data-metric="failed">{{ counts.failed }}</strong></div>
+  <div class="metric warn"><span>{{ 'Pending Master' if app_mode == 'lite' else 'Pending sync' }}</span><strong data-metric="pending_sync">{{ counts.pending_sync }}</strong></div>
+  <div class="metric danger"><span>{{ 'Failed Master' if app_mode == 'lite' else 'Failed sync' }}</span><strong data-metric="failed">{{ counts.failed }}</strong></div>
   <div class="metric warn"><span>Shelf verification</span><strong data-metric="shelf_verification_pending">{{ counts.shelf_verification_pending }}</strong></div>
   <div class="metric"><span>Total serials</span><strong data-metric="serials">{{ counts.serials }}</strong></div>
 </section>

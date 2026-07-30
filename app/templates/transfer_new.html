@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}New franchise transfer - Setuora Lite{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Stock network</p>
+    <h1>New outbound transfer</h1>
+    <p>Create the manifest first, then scan each serial before dispatch.</p>
+  </div>
+  <a class="button" href="/transfers">Back to transfers</a>
+</section>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<section class="panel form-panel">
+  <form method="post" action="/transfers" class="grid-form">
+    <label>Destination franchise code
+      <input name="peer_code" value="{{ peer_code }}" maxlength="80" autocomplete="off" placeholder="For example BLR-02" required autofocus>
+    </label>
+    <label>Notes
+      <textarea name="notes" rows="3" maxlength="1000" placeholder="Dispatch note, vehicle, or internal reference">{{ notes }}</textarea>
+    </label>
+    <div class="actions">
+      <button class="button primary" type="submit">Create manifest</button>
+      <a class="button" href="/transfers">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

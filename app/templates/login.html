@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Login - Setuora</title>
+  <title>Login - {{ 'Setuora Lite' if app_mode == 'lite' else 'Setuora' }}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css?v=20260710-table-fonts-3">
 </head>
@@ -11,8 +11,10 @@
   <main class="auth-shell">
     <section class="auth-panel">
       <div>
-        <h1>Setuora Barcode Tally Bridge</h1>
-        <p class="muted" style="margin-top:8px">Sign in to scan stock and sync with Tally.</p>
+        <h1>{{ 'Setuora Lite' if app_mode == 'lite' else 'Setuora Barcode Tally Bridge' }}</h1>
+        <p class="muted" style="margin-top:8px">
+          {{ 'Run local stock operations and synchronize them with Setuora Master.' if app_mode == 'lite' else 'Sign in to scan stock and sync with Tally.' }}
+        </p>
       </div>
       {% if error %}
       <div class="alert error">{{ error }}</div>

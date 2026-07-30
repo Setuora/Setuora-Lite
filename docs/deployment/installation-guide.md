@@ -1,211 +1,164 @@
-# Installation Guide
+# Self-Hosted Installation Guide
 
-## Target
+## Supported Topology
 
-Factory LAN deployment on the SERVER machine with Tally Prime running locally or reachable on the LAN.
+Each franchise runs one Docker Compose project:
+
+```text
+Approved LAN browsers
+  -> private LAN TCP 443
+  -> Caddy internal-CA HTTPS
+  -> Setuora Lite (one process) -> persistent SQLite/outbox
+                                      |
+                                      v
+                         Docker-internal HTTPS proxy
+                                      |
+                         Tailscale tag:setuora-lite
+                                      |
+                         Master private *.ts.net:443
+```
+
+Lite and Caddy remain available when Tailscale, the Internet, or Master is
+offline. Lite does not use Tailscale Serve or Funnel and does not accept an
+inbound WAN connection.
 
 ## Prerequisites
 
-- Windows 11 or Ubuntu 24.04 LTS
-- Python 3.11 for the current pinned dependency set
-- Tally Prime configured as server on port `9000`
-- Chrome or Edge on staff phones
-- LAN hostname or static IP for the server
+On the franchise server:
 
-## Windows Install
+- Linux with Docker Engine/Compose v2, or Windows with Docker Desktop using
+  Linux containers;
+- Docker configured to start after host reboot;
+- a reserved private LAN IPv4 address;
+- TCP 80/443 allowed from the approved local subnet only;
+- reliable system time and outbound Internet access.
 
-For a non-technical Windows install, open `Setuora.exe`, choose **Install or finish
-setup**, and approve the Administrator prompt. For later maintenance, use the same
-executable and choose **Repair** or **Update**; no command line is required.
+Prepared centrally:
 
-The lower-level setup script remains available from an Administrator PowerShell:
+- Master is already deployed at a private HTTPS `*.ts.net` URL;
+- the franchise has a permanent unique code in Master;
+- Master has issued the one-time-visible `setuora-node.*` credential for that
+  franchise;
+- Tailscale has a one-off, pre-authorized, non-ephemeral auth key tagged
+  `tag:setuora-lite`;
+- the tailnet grant permits `tag:setuora-lite` to
+  `tag:setuora-master` on TCP 443 only.
 
-```powershell
-.\scripts\setup.bat
-```
+Use a different Tailscale enrollment key and Setuora node credential for every
+franchise.
 
-The helper:
+## First Setup
 
-- checks for Python 3.11 and can install it with `winget` when available
-- creates `.venv`, `data/`, and `logs/`
-- installs the hash-verified `requirements.lock`
-- asks for the first admin username and password
-- writes `.env`
-- verifies that the app imports correctly
-- installs Caddy with WinGet and configures LAN HTTPS by default
-- creates an auto-start Caddy service and a local-subnet firewall rule
-- exports Caddy's public root certificate for installation on staff phones
-- installs the automatic NSSM Windows service when accepted (default: yes)
-- starts Setuora and Caddy when finished
-
-`Setuora.exe repair` preserves `.env`, database files, backups, and source files.
-It validates or rebuilds the virtual environment, reinstalls hash-verified
-dependencies, refreshes automatic Setuora and Caddy services, runs the app smoke
-test and full regression suite, and starts both services.
-
-After setup, start the app anytime with:
-
-```text
-scripts\start_setuora.bat
-```
-
-Use `scripts\start_setuora.bat --port 8001` if port `8000` is already in use.
-
-Stop the app, including the Windows service when installed, with:
-
-```text
-scripts\stop_setuora.bat
-```
-
-Run `scripts\stop_setuora.bat` as Administrator when Setuora is installed as a Windows
-service.
-
-To safely pull the latest version from GitHub, update dependencies, test it, and
-restore the server state, choose **Update** in `Setuora.exe` or run:
-
-```text
-scripts\update.bat
-```
-
-Run the updater as Administrator when Setuora is installed as a Windows service.
-The updater refuses uncommitted local code changes and never rebases. It normally
-applies a fast-forward update. If a clean installation has diverged from official
-release history, it preserves the installed commit on a timestamped
-`setuora-backup/...` branch before realigning source files to the downloaded
-release. Runtime data, `.env`, and backups remain untouched.
-
-### One-time recovery for an older diverged updater
-
-Older installations may stop with `Not possible to fast-forward, aborting`
-before they can receive the improved updater. In an Administrator PowerShell,
-run the following only when that exact divergence error appears:
-
-```powershell
-Set-Location C:\Setuora
-.\Setuora.exe stop
-$changes = @(git status --porcelain)
-if ($changes.Count -gt 0) { throw "Local source changes exist; stop and have an administrator review them." }
-git fetch --no-tags origin main
-$oldHead = (git rev-parse HEAD).Trim()
-$shortHead = (git rev-parse --short HEAD).Trim()
-$backupBranch = "setuora-backup/$(Get-Date -Format 'yyyyMMdd-HHmmssfff')-$shortHead"
-git branch $backupBranch $oldHead
-git reset --hard FETCH_HEAD
-.\Setuora.exe repair
-.\Setuora.exe start
-```
-
-The backup branch preserves the prior committed installation. The Git reset
-does not touch ignored `.env`, `data`, `logs`, or backup files.
-
-Pass `-SkipCaddy` to `scripts\setup.bat` if another reverse proxy already provides
-HTTPS. When Caddy is configured, install
-`deployment\caddy\setuora-caddy-root.crt` as a trusted CA certificate on every
-phone that connects to Setuora.
-
-## Manual Install
-
-Linux/macOS:
+Open a terminal in the reviewed Lite release and run:
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install --require-hashes -r requirements.lock
-cp .env.example .env
+python deploy.py setup
 ```
 
-On Windows PowerShell:
+The same command is used on Linux and Windows. The helper:
 
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --require-hashes -r requirements.lock
-copy .env.example .env
-```
+- validates Docker Engine and Compose;
+- creates `.env` with restrictive permissions where supported;
+- generates a random application secret;
+- prompts securely for the first administrator password, Tailscale enrollment
+  key, and Setuora node key;
+- validates the permanent franchise code, private Master URL, LAN hostname, and
+  private bind address;
+- builds and starts Lite, Caddy, and Tailscale;
+- verifies SQLite-backed application health and LAN HTTPS;
+- waits for this installation's persistent Tailscale identity;
+- removes the one-off Tailscale key and bootstrap password from `.env`;
+- exports Caddy's public root certificate;
+- calls authenticated `GET /api/v1/node` through the Tailscale proxy and
+  refuses a credential/franchise-code mismatch;
+- binds the resumable enrollment marker to Master's exact node `public_id`;
+- initializes and verifies sequence 1 for a genuinely new empty node.
 
-Edit `.env`:
+Secrets are not placed in shell history or printed in expanded Compose output.
+Keep `.env` out of source control and in encrypted configuration backups.
 
-```text
-APP_SECRET_KEY=replace-with-a-long-random-secret
-BOOTSTRAP_ADMIN_USERNAME=admin
-BOOTSTRAP_ADMIN_PASSWORD=replace-before-first-use
-DATABASE_URL=sqlite:///./data/setuora.db
-SESSION_COOKIE_SECURE=true
-TRUSTED_HOSTS=setuora.local,127.0.0.1,localhost
-```
+Setup is intentionally strict. A regular `start` remains offline-tolerant, but
+first enrollment is not complete until both Tailscale and Master identity checks
+pass. Fresh enrollment requires Master's exact cursor to be `0/1`; completion
+requires Master's accepted cursor to match Lite's last `SENT` sequence and next
+sequence. Established nodes retain that identity binding across later
+offline-tolerant restarts.
 
-Start the app:
+## LAN Certificate
+
+Setup prints the LAN HTTPS URL and exported public CA path. Install that public
+root certificate on every approved staff phone/workstation before opening the
+site. Do not distribute the Caddy data volume; it contains the private CA.
+
+Export the public root again when needed:
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+python deploy.py export-ca
 ```
 
-For a production LAN deployment, open only through the configured HTTPS proxy:
+See [LAN HTTPS](https-lan-guide.md).
 
-```text
-https://setuora.local
+## Daily Lifecycle
+
+```bash
+python deploy.py status
+python deploy.py preflight
+python deploy.py verify-sync
+python deploy.py logs
+python deploy.py logs setuora
+python deploy.py logs caddy
+python deploy.py logs tailscale
+python deploy.py stop
+python deploy.py start
+python deploy.py update
 ```
 
-## First Login
+`start` and `update` require the local application and LAN HTTPS to become
+healthy. They report Tailscale/Master degradation separately and do not make a
+WAN outage block local operation.
 
-If `scripts\setup.bat` created `.env`, use the admin login printed at the end of setup. If you copied `.env.example`, use the bootstrap admin from `.env`, then create named users from `Users`.
+`stop` preserves application, Tailscale, and Caddy volumes. Never run
+`docker compose down --volumes` during normal operation.
 
-The app refuses to initialize its first administrator with an empty, placeholder,
-or default password. Replace every placeholder before starting it.
+## Existing Host-Service Installation
 
-Changing bootstrap values after the database exists does not update an existing user. Use the `Users` page for normal user administration.
+Do not point the new stack at an existing live SQLite file and do not accept a
+fresh empty Docker volume as a replacement for franchise data.
 
-## First Configuration
+Before cutover:
 
-1. Open `Settings`.
-2. Add or activate a company profile.
-3. Enter exact Tally host, port, company, voucher type, ledger, GST, round-off, and party names.
-4. Leave sync disabled until validation is complete.
-5. Create products with exact Tally stock item names.
-6. Open `Tally Check`.
-7. Mark each master checked only after comparing with Tally.
-8. Download a purchase, sale, or sales-return batch XML and validate it in the real Tally company.
-9. Enable Tally sync only after Tally Check is complete.
+1. stop transaction entry;
+2. create and retain a verified application backup;
+3. stop the old NSSM/Python/Caddy services;
+4. review the permanent franchise code and every existing QR for global
+   collisions;
+5. settle, migrate, or explicitly exclude every legacy
+   `PENDING_SYNC`/`SYNCING`/`FAILED` batch; the inventory baseline does not
+   recreate historical transactions or Tally vouchers;
+6. migrate the database into the named application volume using the approved
+   cutover procedure;
+7. initialize active `GENERATED`/`IN_STOCK` inventory before event 1;
+8. verify Master ownership, cursor, and reports before reopening operations.
 
-Switching the active company disables sync until that company's masters are checked.
+The deployment helper detects a legacy local database and refuses to silently
+ignore it. Sold/issued history and pre-cutover reports require an explicit
+migration decision. Connected database rollback additionally requires Master
+cursor reconciliation; see [Backup and restore](backup-restore-guide.md).
 
-## Health Check
+The old `Setuora.exe`, Windows scripts, host Caddy, and NSSM files remain only
+for examining/stopping an existing installation. They are not the supported
+path for a new connected Lite deployment.
 
-With the app running, open:
+## Validation
 
-```text
-http://127.0.0.1:8000/health
-```
-
-Expected response:
-
-```json
-{ "status": "ok" }
-```
-
-## Backup Reminder
-
-Setuora creates verified automatic backups into `data/backups/` by default. For
-off-machine protection, set `BACKUP_OFFSITE_DIRECTORY` in `.env` to another
-drive or network share and confirm the Maintenance page shows the latest copied
-backup.
-
-If server backup software is also used, include the whole project `data/`
-folder, a separate copy of `.env`, and `deployment/caddy/state` when Caddy is
-used. The Caddy state contains private keys and must not be distributed. The
-app's Maintenance page also provides a SQLite-safe database download for manual
-backups.
-
-## Test Reminder
-
-Run tests from a Python 3.11 environment:
+From a development/release checkout:
 
 ```bash
 python -m pytest -q
+python -m compileall -q app
+docker compose config --quiet
+docker compose build setuora
 ```
 
-Expected current result:
-
-```text
-All collected tests pass.
-```
+Before live use, complete the
+[production release checklist](production-release-checklist.md).

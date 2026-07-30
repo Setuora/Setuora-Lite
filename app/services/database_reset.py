@@ -17,7 +17,11 @@ from app.models import (
     ChangeAudit,
     Company,
     InventoryTransaction,
+    LocalTransfer,
+    LocalTransferItem,
     LoginAudit,
+    MasterInboxCommand,
+    MasterOutboxEvent,
     Product,
     RelocationSerial,
     Role,
@@ -38,6 +42,10 @@ from app.services.settings import DEFAULT_SETTINGS
 
 
 DELETE_ALL_MODELS = (
+    MasterInboxCommand,
+    MasterOutboxEvent,
+    LocalTransferItem,
+    LocalTransfer,
     AuditFinding,
     SyncAttempt,
     BatchItem,

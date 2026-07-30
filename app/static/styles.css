@@ -3560,10 +3560,25 @@ table .status,
   color: var(--ok-fg);
 }
 
+.status.received,
+.status.sent,
+.status.applied {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
 .status.pending_sync,
 .status.generated,
 .status.unassigned,
 .status.draft {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.status.in_transit,
+.status.awaiting_receipt,
+.status.partially_received,
+.status.sending {
   background: var(--warn-bg);
   color: var(--warn-fg);
 }

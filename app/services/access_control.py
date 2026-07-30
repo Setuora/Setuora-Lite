@@ -92,17 +92,6 @@ CELL_META = {
     "no": ("No", "failed"),
 }
 
-ACCESS_VALUE_PRIORITY = {
-    "edit": 5,
-    "yes": 4,
-    "workflow": 3,
-    "view": 2,
-    "shown": 1,
-    "no": 0,
-    "hidden": 0,
-}
-
-
 def _roles(*roles: Role) -> list[str]:
     return [role.value for role in roles]
 
@@ -447,14 +436,6 @@ def _configured_access_values(config: dict[str, dict[str, str]], role: Role | st
         else:
             values.append(config.get(access_key, {}).get(role_value, "no"))
     return values
-
-
-def role_access_value(db: Session, role: Role | str, access_key: str) -> str:
-    config = get_role_access_config(db)
-    values = _configured_access_values(config, role, access_key)
-    if not values:
-        return "no"
-    return max(values, key=lambda value: ACCESS_VALUE_PRIORITY.get(value, 0))
 
 
 def _role_has_access_value(

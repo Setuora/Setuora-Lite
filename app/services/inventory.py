@@ -6,6 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import (
     Batch,
     BatchItem,
@@ -38,6 +39,41 @@ REGISTERED_GST_REGISTRATION_TYPES = {
 
 def normalize_serial(serial_number: str) -> str:
     return serial_number.strip().upper()
+
+
+def franchise_serial_prefix(prefix: str) -> str:
+    """Namespace new Lite serials so QR values are globally unique."""
+
+    serial_prefix = normalize_serial(prefix)
+    settings = get_settings()
+    app_mode = str(getattr(settings, "app_mode", "legacy") or "legacy").strip().lower()
+    if app_mode != "lite":
+        return serial_prefix
+
+    raw_code = str(getattr(settings, "franchise_code", "") or "").strip().upper()
+    franchise_code = re.sub(r"[^A-Z0-9]+", "-", raw_code).strip("-")
+    placeholder_codes = {
+        "CHANGE-ME",
+        "CHANGEME",
+        "DEFAULT",
+        "FRANCHISE",
+        "FRANCHISE-CODE",
+        "LITE",
+        "MASTER",
+        "SETUORA",
+        "YOUR-FRANCHISE",
+        "YOUR-FRANCHISE-CODE",
+    }
+    if not franchise_code or franchise_code in placeholder_codes:
+        raise InventoryError(
+            "Configure a permanent unique FRANCHISE_CODE before generating "
+            "QR labels in Setuora Lite."
+        )
+    if len(franchise_code) > 40:
+        raise InventoryError("FRANCHISE_CODE must be 40 characters or fewer.")
+    if serial_prefix == franchise_code or serial_prefix.startswith(f"{franchise_code}-"):
+        return serial_prefix
+    return f"{franchise_code}-{serial_prefix}"
 
 
 def gst_registration_requires_gstin(value: str | None) -> bool:
@@ -477,7 +513,11 @@ def generate_serials(
         raise InventoryError("Quantity must be at least 1")
     if quantity > 5000:
         raise InventoryError("Generate 5000 labels or fewer at a time")
-    serial_prefix = normalize_serial(prefix or product.product_code)
+    serial_prefix = franchise_serial_prefix(prefix or product.product_code)
+    if not serial_prefix:
+        raise InventoryError("Serial prefix cannot be empty")
+    if len(serial_prefix) > 133:
+        raise InventoryError("Serial prefix must be 133 characters or fewer")
     pattern = re.compile(rf"^{re.escape(serial_prefix)}-(\d+)$")
     for attempt in range(5):
         max_number = 0

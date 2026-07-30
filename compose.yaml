@@ -1,0 +1,130 @@
+name: setuora-lite
+
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.98.9@sha256:f15d5d3f4a68773a853180b72496f70ba614b64de0878c43fe3da39fe0afba47
+    hostname: ${TAILSCALE_HOSTNAME:-setuora-lite}
+    environment:
+      TS_ACCEPT_DNS: "true"
+      TS_AUTHKEY: ${TAILSCALE_AUTH_KEY:-}
+      TS_AUTH_ONCE: "true"
+      TS_EXTRA_ARGS: --advertise-tags=${TAILSCALE_TAG:-tag:setuora-lite}
+      TS_HOSTNAME: ${TAILSCALE_HOSTNAME:-setuora-lite}
+      TS_OUTBOUND_HTTP_PROXY_LISTEN: :1055
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    networks:
+      - sync-network
+      - tailscale-egress
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  setuora:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_NAME: ${APP_NAME:-Setuora Lite}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
+      AUTOMATIC_BACKUPS_ENABLED: ${AUTOMATIC_BACKUPS_ENABLED:-true}
+      BACKUP_DIRECTORY: /srv/setuora/data/backups
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-14}
+      BACKUP_SETTINGS_FILE: /srv/setuora/data/backup-settings.env
+      BACKUP_STARTUP_DELAY_SECONDS: ${BACKUP_STARTUP_DELAY_SECONDS:-60}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      DATABASE_URL: sqlite:////srv/setuora/data/setuora.db
+      FRANCHISE_CODE: ${FRANCHISE_CODE:-}
+      HTTPS_PROXY: http://tailscale:1055
+      LOGIN_LOCKOUT_MINUTES: ${LOGIN_LOCKOUT_MINUTES:-15}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-8}
+      MASTER_API_KEY: ${MASTER_API_KEY:-}
+      MASTER_REQUEST_TIMEOUT_SECONDS: ${MASTER_REQUEST_TIMEOUT_SECONDS:-15}
+      MASTER_SYNC_ENABLED: ${MASTER_SYNC_ENABLED:-true}
+      MASTER_SYNC_INTERVAL_SECONDS: ${MASTER_SYNC_INTERVAL_SECONDS:-30}
+      MASTER_TLS_VERIFY: "true"
+      MASTER_URL: ${MASTER_URL:-}
+      NO_PROXY: 127.0.0.1,localhost,setuora,caddy,tailscale
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_TIMEOUT_MINUTES: ${SESSION_TIMEOUT_MINUTES:-480}
+      SETUORA_CONTAINER_DEPLOYMENT: "true"
+      SETUORA_APP_MODE: lite
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-localhost,127.0.0.1}
+      https_proxy: http://tailscale:1055
+      no_proxy: 127.0.0.1,localhost,setuora,caddy,tailscale
+    volumes:
+      - setuora-data:/srv/setuora/data
+    networks:
+      - app-network
+      - sync-network
+    init: true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    environment:
+      SETUORA_LAN_HOSTNAME: ${SETUORA_LAN_HOSTNAME:-localhost}
+    ports:
+      - "${SETUORA_LAN_BIND_ADDRESS:-127.0.0.1}:${SETUORA_HTTP_PORT:-80}:80"
+      - "${SETUORA_LAN_BIND_ADDRESS:-127.0.0.1}:${SETUORA_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deployment/caddy/Caddyfile.container:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - app-network
+      - lan-network
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    pids_limit: 256
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  setuora-data:
+  tailscale-state:
+  caddy-data:
+  caddy-config:
+
+networks:
+  app-network:
+    internal: true
+  sync-network:
+    internal: true
+  lan-network:
+  tailscale-egress:

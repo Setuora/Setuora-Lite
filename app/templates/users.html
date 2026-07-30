@@ -42,17 +42,19 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Username</th><th>Roles</th><th>Tally access</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Username</th><th>Roles</th>{% if app_mode != 'lite' %}<th>Tally access</th>{% endif %}<th>Status</th><th>Actions</th></tr></thead>
       <tbody>
         {% for row in users %}
         <tr>
           <td>{{ row.username }}</td>
           <td>{{ row.role_label }}</td>
+          {% if app_mode != 'lite' %}
           <td><span class="tally-access-summary">{{ user_access[row.id].summary }}</span></td>
+          {% endif %}
           <td><span class="status {{ 'synced' if row.active else 'failed' }}">{{ 'ACTIVE' if row.active else 'DISABLED' }}</span></td>
           <td>
             <div class="user-actions">
-            {% if not has_role(row, 'super_admin') %}
+            {% if app_mode != 'lite' and not has_role(row, 'super_admin') %}
             <button
               class="button small ghost"
               type="button"
@@ -91,6 +93,7 @@
   </div>
 </section>
 
+{% if app_mode != 'lite' %}
 <dialog id="tally-access-modal" class="modal tally-access-modal">
   <div class="modal__head">
     <div>
@@ -206,6 +209,7 @@
     </form>
   </div>
 </dialog>
+{% endif %}
 
 {% if has_role(user, 'super_admin') %}
 <dialog id="password-reset-modal" class="modal">

@@ -4,6 +4,8 @@ import os
 import sqlite3
 from types import SimpleNamespace
 
+import pytest
+
 import app.services.backup as backup_service
 import app.services.backup_worker as backup_worker
 from app.config import get_settings
@@ -172,6 +174,59 @@ def test_update_backup_settings_persists_env_and_refreshes_runtime(tmp_path, mon
     assert os.environ["BACKUP_RETENTION_COUNT"] == "7"
     assert get_settings().backup_retention_count == 7
     get_settings.cache_clear()
+
+
+def test_container_backup_settings_persist_only_inside_data_volume(tmp_path, monkeypatch):
+    for key in backup_service.BACKUP_ENV_KEYS:
+        monkeypatch.setenv(key, "")
+    database_path = tmp_path / "data" / "setuora.db"
+    database_path.parent.mkdir()
+    settings_file = database_path.parent / "backup-settings.env"
+    backup_dir = database_path.parent / "backups"
+    settings = SimpleNamespace(
+        database_url=f"sqlite:///{database_path}",
+        automatic_backups_enabled=True,
+        backup_directory=str(backup_dir),
+        backup_offsite_directory="",
+        backup_interval_hours=24,
+        backup_retention_count=14,
+        container_deployment=True,
+    )
+    monkeypatch.setattr(backup_service, "ENV_FILE", settings_file)
+    def fake_get_settings():
+        return settings
+
+    fake_get_settings.cache_clear = lambda: None
+    monkeypatch.setattr(backup_service, "get_settings", fake_get_settings)
+
+    backup_service.update_backup_settings(
+        enabled=True,
+        backup_directory=str(backup_dir),
+        interval_hours="12",
+        retention_count="10",
+        offsite_directory="",
+    )
+
+    assert backup_dir.is_dir()
+    assert settings_file.is_file()
+    assert "BACKUP_INTERVAL_HOURS=12" in settings_file.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must stay inside"):
+        backup_service.update_backup_settings(
+            enabled=True,
+            backup_directory=str(tmp_path / "outside"),
+            interval_hours="12",
+            retention_count="10",
+            offsite_directory="",
+        )
+    with pytest.raises(ValueError, match="managed by the host"):
+        backup_service.update_backup_settings(
+            enabled=True,
+            backup_directory=str(backup_dir),
+            interval_hours="12",
+            retention_count="10",
+            offsite_directory=str(tmp_path / "offsite"),
+        )
 
 
 def test_verify_setuora_backup_rejects_non_setuora_sqlite(tmp_path):

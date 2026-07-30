@@ -248,10 +248,10 @@
     </div>
   </div>
   <div class="panel split-card reports-activity-card">
-    <div class="section-title"><h2>Pending sync</h2></div>
+    <div class="section-title"><h2>{{ 'Pending Master delivery' if app_mode == 'lite' else 'Pending sync' }}</h2></div>
     <div class="table-scroll reports-activity-scroll">
       <table class="reports-activity-table reports-pending-table">
-        <thead><tr><th>Batch</th><th>Status</th><th>Retries</th><th>Last retry</th><th>Error</th></tr></thead>
+        <thead><tr><th>Batch</th><th>Status</th>{% if app_mode != 'lite' %}<th>Retries</th><th>Last retry</th>{% endif %}<th>Error</th></tr></thead>
         <tbody>
           {% for batch in pending %}
           <tr>
@@ -263,12 +263,14 @@
               {% endif %}
             </td>
             <td><span class="status {{ batch.status|lower }}">{{ batch.status }}</span></td>
+            {% if app_mode != 'lite' %}
             <td>{{ batch.retry_count or 0 }}</td>
             <td>{{ report_date(batch.last_retry_at) or '-' }}</td>
+            {% endif %}
             <td>{{ batch.last_error or '-' }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="5" class="empty">No pending sync</td></tr>
+          <tr><td colspan="{{ 3 if app_mode == 'lite' else 5 }}" class="empty">No pending {{ 'Master delivery' if app_mode == 'lite' else 'sync' }}</td></tr>
           {% endfor %}
         </tbody>
       </table>

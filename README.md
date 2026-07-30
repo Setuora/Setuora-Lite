@@ -1,41 +1,71 @@
-# Setuora Barcode Tally Bridge
+# Setuora Lite — Franchise Operations Node
 
-Setuora is a LAN-first barcode transaction bridge for Tally Prime. It lets staff scan product barcodes from phones, keeps serial-level history locally, and syncs supported stock movements to Tally through its XML gateway.
+`Setuora-Lite` runs inside a franchise LAN and owns the operational workflows:
+purchase, sale, return, issue, audit, QR generation/printing, and local inventory
+history. It is designed to continue local capture during an Internet outage.
 
-## Current Features
+Lite connects to Setuora Master using outbound HTTPS only. It
+uploads durable, idempotent events, polls Master for commands and incoming
+transfers, and never requires an inbound WAN firewall rule. Master—not Lite—owns
+consolidated monitoring and the central Tally queue.
+
+> **Rollout status — self-hosted Lite/Master pilot implemented; operational
+> acceptance pending.** Lite mode has an ordered durable outbox, idempotent
+> command inbox, outbound sync worker, franchise-namespaced QR generation, and
+> partial/full inter-franchise transfers. The supported deployment adds
+> LAN-only Caddy HTTPS and an outbound-only Tailscale identity. Direct Tally
+> routes and the Tally retry worker are excluded from Lite. Existing-data
+> cutover, cursor recovery, credential drills, and two-node outage/restore/soak
+> tests remain rollout gates.
+
+See [Lite Node Synchronization](docs/architecture/lite-node-sync.md) and the
+normative
+[Node Sync API v1](../Setuora-Master/docs/api/node-sync-v1.md).
+
+## Current Local Foundation
 
 - Role-based login for admin, purchase, sales, and audit users
 - Product master with HSN, GST, unit, default rate, sales discount, and exact Tally stock item name
 - Bulk serial generation and printable/PDF QR labels with the serial number only
 - Product batch, manufacturing date, expiry date, and warehouse tracking for assigned stock
 - Purchase, sale, audit, sales return, purchase return, stock issue, barcode assignment, and barcode replacement workflows
+- Atomic local inventory plus durable Master-outbox commit for submitted batches
+- Strict oldest-first event replay with immutable UUID, sequence, payload, and SHA-256
+- Fail-closed 5,000-item/5 MiB frozen-body limits with byte-aware initial
+  baseline chunking
+- Durable idempotent Master-command inbox and outbound command polling/ACK
+- Franchise-code namespacing for newly generated QR values in Lite mode
+- Source dispatch locking and destination manifest scan with partial/full receipt
 - Batch pricing, GST split, round off, and voucher preview before submit
 - FEFO picking and expiry control for sale, issue, and purchase-return batches
-- Tally XML generation for purchase/receive, sale, and sales-return batches
-- Tally Check screen for exact-name master readiness
-- Live Tally company, ledger-name, and dated sales-book discovery for sync setup
-- Saved Tally company profiles with active-company settings
+- Inherited direct Tally XML, readiness, discovery, profile, and retry paths;
+  these require an explicit test-only legacy gate and are not registered in Lite
 - Editable admin role access controls for pages, actions, and data areas
-- Pending sync queue, manual retry, and automatic retry worker
 - Audit reconciliation for verified, missing, and extra serials
 - Dashboard counts, charts, recent activity, and live refresh
 - Configurable stock movement, stock-cover, slow/dead stock, overstock, and expiry-risk analysis with warehouse/franchise filters
 - Excel reports, transaction history, scan history, and PDF audit reports
 - SQLite-safe backup download and restore procedure
+  (connected Lite nodes deliberately block browser reset/restore until cursor
+  reconciliation exists)
+
+The Master connection page provides a required one-time initialization event:
+an active `GENERATED`/`IN_STOCK` snapshot for an existing-data site or an empty
+heartbeat for a greenfield site. Ordinary events are fail-closed until that
+marker exists for the permanent franchise code. Historical sold/issued
+migration, destination directory/cancel recovery, automated cursor
+reconciliation after restore, stronger sync-health alerts, durable worker
+leases, and two-node failure/soak testing remain rollout work. The current
+worker and SQLite database are a single-process MVP.
 
 ## Folder Structure
 
 ```text
-Proj_Setu/
-|-- README.md                         Project guide and setup notes
-|-- Setuora.exe                       Unified Windows setup and control tool
-|-- scripts/                          Windows workflows used by Setuora.exe
-|   |-- setup.bat                     Setup workflow
-|   |-- start_setuora.bat             Start workflow
-|   |-- stop_setuora.bat              Stop workflow
-|   `-- update.bat                    Update workflow
-|-- requirements.txt                  Direct Python dependency pins
-|-- requirements.lock                 Hash-verified production dependency lock
+Setuora-Lite/
+|-- compose.yaml                      Lite, Caddy, and Tailscale services
+|-- Dockerfile                        Non-root Lite runtime image
+|-- deploy.py                         Linux/Windows deployment lifecycle
+|-- requirements-runtime.lock         Hash-verified container dependencies
 |-- app/                              FastAPI application
 |   |-- main.py                       App entrypoint and route registration
 |   |-- models.py                     SQLAlchemy database models
@@ -43,195 +73,115 @@ Proj_Setu/
 |   |-- services/                     Business logic and integrations
 |   |-- static/                       Browser JavaScript, CSS, and assets
 |   `-- templates/                    Jinja HTML templates
-|-- deployment/                       Windows service and Caddy config
-|-- docs/                             Deployment, handoff, and context docs
+|-- deployment/caddy/Caddyfile.container  LAN HTTPS reverse proxy
+|-- docs/                             Architecture and operating guides
 |-- tests/                            Pytest coverage
-|-- data/                             Runtime database and backups, ignored by git
-`-- logs/                             Runtime logs, ignored by git
+`-- data/                             Local-development data, ignored by git
 ```
 
-## Prerequisites
+## Supported Self-Hosted Deployment
 
-- Python 3.11 for the current pinned dependency set
-- Tally Prime installed and running on the server machine or reachable on the LAN
-- Chrome or Edge for staff phones
-- Administrator access during Windows setup to install Caddy, its service, and the LAN firewall rule
+The same deployment is supported on Linux and Windows:
 
-## Quick Windows Setup For Non-Technical Users
+- Docker Engine with Compose v2, or Docker Desktop using Linux containers;
+- a reserved private LAN address or reviewed LAN DNS name;
+- reliable UTC time and outbound Internet access for Tailscale;
+- a one-off, non-ephemeral, pre-authorized Tailscale key tagged
+  `tag:setuora-lite`;
+- the private Master URL printed by Master setup;
+- the one-time `setuora-node.*` credential issued for this exact franchise.
 
-For a new server, run `Setuora.exe` and choose `Install or finish setup`, then approve the
-Windows administrator prompt. The executable installs Git for Windows if it is
-missing, downloads or updates the official `main` branch into `C:\Setuora`, and
-then runs the complete interactive setup described below. Internet access is
-required. Setup places a copy of `Setuora.exe` in the installation folder for
-later use.
+Tally is not a Lite prerequisite and port 9000 must not be reachable from this
+stack.
 
-The installer can also repair or update an existing `C:\Setuora` installation.
-Choose `Repair this installation` for an automatic dependency, virtual-environment,
-service, import, and regression-test check. Repair keeps `.env`, the database,
-backups, runtime data, and source files unchanged, then restores the app to its
-previous running or stopped state. Installer source and reproducible build
-instructions are in `installer/`.
-
-The same executable controls the normal lifecycle after setup:
-
-```text
-Setuora.exe setup
-Setuora.exe repair
-Setuora.exe update
-Setuora.exe start
-Setuora.exe stop
-```
-
-Setup, repair, update, and stop command windows close automatically when their
-work finishes. A console-mode start window remains open only while the Setuora
-server is running and closes after the server stops.
-
-Setup checks for Python 3.11, installs the hash-verified dependency lock, creates
-`data/` and `logs/`, asks for the first admin login, writes `.env`, and runs a
-smoke test. By default it configures Caddy HTTPS, installs automatic Setuora and
-Caddy Windows services, starts both, and opens LAN firewall ports 80 and 443.
-Use `Setuora.exe setup --with-caddy=false` only when another reviewed HTTPS proxy
-is already in use.
-
-`Setuora.exe setup`, `repair`, `update`, `start`, and `stop` request Administrator
-access automatically when launched through the unified executable.
-The updater refuses a dirty worktree, does nothing when the installation is
-already current, installs the hash-verified dependency lock, runs the test suite,
-and restores the app to the state it had before the update. Normal releases are
-fast-forwarded. If official release history differs from a clean installation,
-the installed commit is first preserved on a timestamped `setuora-backup/...`
-branch before source files are realigned. Runtime data, `.env`, and backups are
-not changed.
-
-Before going live on the target server, run the [production release
-checklist](docs/deployment/production-release-checklist.md). It verifies the
-actual Windows services, Caddy TLS, security headers, source checkout, tests,
-and a fresh verified backup without disclosing secrets.
-
-## 1. Open The Project Folder
+First enroll the franchise in Master with its permanent code. Then, from the
+Lite project root, run:
 
 ```bash
-cd /home/dj/Projects/Proj_Setu
+python deploy.py setup
 ```
 
-On Windows, use the folder where this project is copied, for example:
+The helper validates Docker, creates and protects `.env`, prompts without
+putting secrets in shell history, starts Lite/Caddy/Tailscale, verifies the
+database-backed health endpoint and LAN HTTPS, persists the Tailscale identity,
+removes bootstrap secrets, and checks authenticated `GET /api/v1/node` through
+the Tailscale proxy. Setup fails if the Master credential belongs to a different
+franchise code.
 
-```powershell
-cd C:\Setuora
+The supported topology is:
+
+```text
+Staff browser
+  -> franchise LAN HTTPS
+  -> Caddy
+  -> Setuora Lite + SQLite/outbox
+  -> Docker-internal HTTP CONNECT proxy
+  -> Tailscale (tag:setuora-lite)
+  -> private Master *.ts.net:443
 ```
 
-## 2. Create A Virtual Environment
+Lite has no Tailscale Serve/Funnel listener. Tailscale and Master may be offline
+while Lite and Caddy start and serve LAN operations; synchronization retries
+from the durable outbox when connectivity returns.
 
-Linux/macOS:
+Daily commands:
+
+```bash
+python deploy.py status
+python deploy.py preflight
+python deploy.py verify-sync
+python deploy.py logs
+python deploy.py update
+python deploy.py stop
+python deploy.py start
+python deploy.py export-ca
+```
+
+`stop` preserves all application, Tailscale, and Caddy volumes. Never use
+`docker compose down --volumes` during normal operation.
+
+Install the public CA file exported by `setup`/`export-ca` on each approved
+staff phone or workstation before opening the printed LAN HTTPS URL. Keep the
+Caddy data volume private; only the exported public root is distributed.
+
+The old `Setuora.exe`, NSSM, and host-Caddy scripts are retained only as
+existing-installation migration references. They are not the supported setup
+path for a connected Lite node.
+
+### Existing Local Database
+
+Setup refuses to silently ignore a legacy `data/*.db`. Stop the old service,
+create and retain a verified backup, and complete the reviewed active-inventory
+baseline/collision procedure before switching to the named Docker volume.
+Never allow the first ordinary event to precede the initialization marker.
+Connected restores also require Master cursor reconciliation; see the
+[backup and restore guide](docs/deployment/backup-restore-guide.md).
+
+### Local Development
+
+Python 3.11 development remains available:
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-```
-
-Windows PowerShell:
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-If PowerShell blocks activation, run:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-Then activate again.
-
-## 3. Install Dependencies
-
-```bash
 pip install --require-hashes -r requirements.lock
-```
-
-If `pip` is missing on Linux, install it with your OS package manager, then rerun the command.
-
-## 4. Create The Environment File
-
-Linux/macOS:
-
-```bash
 cp .env.example .env
-```
-
-Windows PowerShell:
-
-```powershell
-copy .env.example .env
-```
-
-Open `.env` and update these before real use:
-
-```text
-APP_SECRET_KEY=replace-with-a-long-random-secret
-BOOTSTRAP_ADMIN_USERNAME=admin
-BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-unique-password
-DATABASE_URL=sqlite:///./data/setuora.db
-SESSION_COOKIE_SECURE=true
-TRUSTED_HOSTS=setuora.local,127.0.0.1,localhost
-```
-
-The app refuses to create its first administrator with an empty, placeholder, or
-default password. For a LAN deployment, serve only through HTTPS and set the
-actual Caddy hostname or address in `TRUSTED_HOSTS`.
-
-## 5. Start The App
-
-Development mode:
-
-```bash
 uvicorn app.main:app --reload
 ```
 
-Production-style local run:
+Use test-only legacy mode only for the inherited regression suite. Do not use
+it on a franchise deployment.
 
-```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
+### First Administration
 
-Open:
-
-```text
-http://127.0.0.1:8000
-```
-
-## 6. First Login
-
-If you used `scripts\setup.bat`, use the admin username and password shown at the end of setup. Keep that password somewhere safe because generated passwords are only displayed once.
-
-After logging in:
-
-1. Open `Users`.
-2. Create named users for purchase, sales, auditor, and admin roles.
-3. Use `Tally access` on a user to assign specific company profiles, ledgers, and Tally usernames. Empty assignment sections allow all values; super admins always have full Tally access.
-4. Disable unused accounts or, as super admin, delete accounts that should no longer appear in the user list.
-5. Store the first-admin password securely; changing bootstrap settings after the database exists does not change existing users.
-
-Changing `BOOTSTRAP_ADMIN_PASSWORD` after `data/setuora.db` already exists does not reset an existing user. Create, disable, or delete users from the `Users` page. Deleted users with old activity are hidden from the list but kept internally for historical records.
-
-## 7. Basic Setup Inside The App
-
-Do this in order:
-
-1. Open `Settings`.
-2. Add or activate a company profile.
-3. Enter the exact Tally company, host, port, voucher type names, ledger names, GST ledgers, and round-off ledger.
-4. Leave `Enable Tally sync` off during setup. Other fields auto-save, but sync only changes when `Save settings` is clicked.
-5. Open `Products`.
-6. Create products using exact Tally stock item names, HSN, GST rate, unit, default rate, and sales discount if applicable.
-7. Generate serial QR labels from `Products`, or use `Barcode Assignment` for existing physical stock.
-8. Open `Tally Check`.
-9. Mark each required Tally master as checked only after confirming the exact spelling in Tally.
-10. Enable Tally sync only after Tally Check has no missing or unchecked items and a test XML is validated in Tally.
-
-When switching the active company profile, Setuora disables Tally sync again so the new company's masters can be checked before posting.
+1. Sign in with the administrator account created during setup.
+2. Confirm `Master connection` shows the initialization event sent and no
+   blocked oldest event.
+3. In Master, confirm the franchise cursor and initial inventory/empty baseline.
+4. Create product masters with complete HSN, GST, unit, rate, and exact Tally
+   stock-item metadata for Master.
+5. Create named users and assign only the required role access.
+6. Complete the release checklist before ordinary transactions.
 
 ## 8. Normal Workflow
 
@@ -280,32 +230,16 @@ Barcode replacement:
 3. Leave new serial blank to auto-generate, or enter a new serial manually.
 4. Print the new label.
 
-## 9. Tally Integration
+## 9. Tally Boundary
 
-Tally sync is disabled by default.
+Lite never connects to Tally or opens port 9000. It sends complete, immutable
+transaction events to Master; Master owns company/Godown mapping, the durable
+Tally queue, retry, posting, and reconciliation. A Master event acknowledgement
+is not Tally success.
 
-Before enabling sync:
-
-1. In Tally Prime, open the target company.
-2. Enable Tally as a server on port `9000`.
-3. Confirm inventory is maintained.
-4. Confirm accounts and inventory are integrated.
-5. In Setuora, complete `Tally Check`.
-6. Download `Tally XML` from a purchase, sale, or sales-return batch and validate it against the real company.
-7. Enable sync in `Settings`.
-
-Supported live XML posting:
-
-- Purchase/receive
-- Sale
-- Sales return as Credit Note
-
-Implemented locally but intentionally not live-posted yet:
-
-- Purchase return
-- Stock issue
-
-Those remain `PENDING_SYNC` until the exact Tally voucher XML for the client company is validated.
+The inherited direct-Tally composition is test-only migration code and cannot
+be enabled by the supported Compose deployment. See
+[Tally boundary](docs/deployment/tally-integration-guide.md).
 
 ## 10. Reports And Exports
 
@@ -319,8 +253,8 @@ Use `Reports` for:
 
 Use batch detail pages for:
 
-- Tally XML download
-- Sync attempt request/response details
+- local transaction and item detail
+- Master event state and retry context
 - Audit PDF export
 
 Use label pages for:
@@ -346,28 +280,16 @@ Backup:
 3. Store the downloaded `.db` file safely.
 4. Keep a separate copy of `.env`.
 
-Automatic verified backups run by default every 24 hours into
-`data/backups/`, retain the latest 14 files, and test each backup with SQLite
-integrity and foreign-key checks before keeping it. Super admins can change the
-automatic backup switch, backup folder, schedule, retention count, and
-off-machine copy folder from `Maintenance`. Set `BACKUP_OFFSITE_DIRECTORY` to
-copy the same verified backup to another drive or network share. Keep a
-separate copy of `.env`.
+Automatic verified backups run every 24 hours inside the persistent application
+volume, retain the newest 14, and pass SQLite integrity/foreign-key checks.
+Copy verified backups off-machine with reviewed volume/host backup tooling and
+keep a separate encrypted copy of `.env`.
 
-For an additional server-level backup such as Cobian Reflector, include the
-whole `data/` folder plus `.env`. The `data/` folder can contain SQLite sidecar
-files such as `setuora.db-wal` and `setuora.db-shm` while the app is running.
-
-Restore:
-
-1. Open `Maintenance` as a super admin.
-2. Use `Import backup` to restore a listed backup or upload a previous `.db` backup.
-3. Sign in again with an account from the restored backup.
-4. Check Dashboard, Products, Serials, and Reports.
-
-Manual restore is still available when the app is stopped: copy the current
-`data/` folder somewhere safe, replace `data/setuora.db`, start the app again, and
-then verify the restored data.
+Browser import/reset is deliberately blocked on connected Lite. An older
+database can have an outbox cursor behind Master even when SQLite is healthy.
+Connected recovery must compare Master's cursor and reconcile inventory and
+transfers before operations resume. See the
+[backup and restore guide](docs/deployment/backup-restore-guide.md).
 
 ## 12. Run Tests
 
@@ -391,54 +313,40 @@ The current pinned dependencies are verified with Python 3.11. A Python 3.13 vir
 
 ## 13. LAN Phone Camera Setup
 
-Phone camera access usually requires HTTPS when accessed from another device on the LAN. The Windows `scripts\setup.bat` helper can configure this automatically:
+Phone camera access requires HTTPS when opened from another LAN device. The
+Compose Caddy service provides it automatically:
 
-1. Run `Setuora.exe setup` as Administrator.
-2. Confirm the detected LAN IP address, or enter a local DNS name that resolves to this server.
-3. Install `deployment\caddy\setuora-caddy-root.crt` as a trusted CA certificate on every phone and laptop that will use Setuora.
-
-The helper installs `CaddyServer.Caddy` with WinGet, writes and validates
-`deployment\caddy\Caddyfile`, creates the automatic `SetuoraCaddy` Windows
-service, and opens ports 80 and 443 to the local subnet. It also sets
-`SESSION_COOKIE_SECURE=true`.
+1. Reserve the configured `SETUORA_LAN_BIND_ADDRESS` on the franchise router or
+   server.
+2. Allow TCP 80/443 only from the approved private LAN.
+3. Run `python deploy.py export-ca`.
+4. Install the exported public root certificate on every approved phone and
+   workstation.
 
 Recommended production shape:
 
 ```text
-Phone browser -> https://setuora.local -> Caddy -> http://127.0.0.1:8000
+Phone browser -> https://<franchise-LAN-host> -> Caddy -> Setuora container:8000
 ```
 
-For manual setup or troubleshooting, use:
+See [LAN HTTPS](docs/deployment/https-lan-guide.md). Back up the private
+`setuora-lite_caddy-data` volume, but distribute only the exported public root
+certificate.
 
-- `docs/deployment/https-lan-guide.md`
-- `deployment/caddy/Caddyfile.example`
+## 14. Automatic Startup
 
-Back up `deployment\caddy\state` with the app data, but do not share it because it contains Caddy's private keys. Only distribute `setuora-caddy-root.crt`, which is the public root certificate.
-
-## 14. Windows Service Setup
-
-For production, Setuora and Caddy run as automatic Windows services and recover
-after process failures. Use `Setuora.exe start` and `Setuora.exe stop` for manual
-control when needed.
-
-See:
-
-- `docs/deployment/windows-service.md`
-- `deployment/windows/install_service.ps1`
-
-The service should run:
-
-```text
-.venv\Scripts\uvicorn.exe app.main:app --host 127.0.0.1 --port 8000
-```
-
-Then Caddy/nginx can expose it over HTTPS on the LAN.
+Compose applies `restart: unless-stopped` to Lite, Caddy, and Tailscale. Configure
+Docker Engine/Desktop to start at host boot. Lite/Caddy do not wait for
+Tailscale health, so an offline reboot still brings the local UI back. The old
+NSSM guide is retained only for migration reference.
 
 ## 15. Useful Deployment Docs
 
-- `docs/codex-windows-handoff.md`
+- `docs/architecture/lite-node-sync.md`
+- `docs/architecture/adr-002-lite-self-hosted-tailscale-egress.md`
+- `../Setuora-Master/docs/api/node-sync-v1.md`
+- `../Setuora-Master/docs/architecture/adr-001-master-lite-control-plane.md`
 - `docs/deployment/installation-guide.md`
-- `docs/deployment/windows-service.md`
 - `docs/deployment/https-lan-guide.md`
 - `docs/deployment/user-manual.md`
 - `docs/deployment/backup-restore-guide.md`
@@ -448,8 +356,8 @@ Then Caddy/nginx can expose it over HTTPS on the LAN.
 
 If login does not work:
 
-- Confirm `.env` exists.
-- Confirm the app was restarted after editing `.env`.
+- Run `python deploy.py status` and `python deploy.py logs setuora`.
+- Confirm the browser uses the printed HTTPS LAN URL.
 - Check the bootstrap username/password.
 
 If camera does not open on phone:
@@ -458,18 +366,17 @@ If camera does not open on phone:
 - Serve the app over HTTPS on the LAN.
 - Confirm the browser has camera permission.
 
-If Tally sync stays pending:
+If Master synchronization is blocked:
 
-- Confirm Tally is open.
-- Confirm Tally server mode is enabled on port `9000`.
-- Open `Tally Check`.
-- Confirm every required master is checked.
-- Open the batch and review sync attempt details.
+- Run `python deploy.py verify-sync`.
+- Confirm Tailscale is online and the Master URL is the private `*.ts.net` URL.
+- Confirm the node credential is active and belongs to this franchise code.
+- Open `Master connection` and inspect the oldest failed event; later events
+  intentionally remain blocked behind it.
 
 If the app fails to start:
 
-- Confirm the virtual environment is active.
-- Run `pip install --require-hashes -r requirements.lock`.
-- Confirm port `8000` is free.
-- Check that `data/` is writable.
-- If using the current pinned dependencies, confirm the virtual environment is Python 3.11.
+- Run `python deploy.py preflight`.
+- Confirm Docker Engine and Compose v2 are running.
+- Check that the configured LAN ports/address are available.
+- Run `python deploy.py logs setuora` and `python deploy.py logs caddy`.

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_permission, require_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import Batch, InventoryTransaction, Role, ScanLog, Serial, StockRelocation, TallyMasterConfirmation, User, serialize_role_values, utc_now
 from app.security import MIN_PASSWORD_LENGTH, hash_password
@@ -19,6 +20,11 @@ from app.templates import templates
 router = APIRouter(prefix="/users")
 
 
+def _app_mode(request: Request) -> str:
+    app = request.scope.get("app")
+    return getattr(getattr(app, "state", None), "app_mode", get_settings().app_mode)
+
+
 def _users_context(
     request: Request,
     current: User,
@@ -30,16 +36,19 @@ def _users_context(
     users = db.scalars(
         select(User).where(User.deleted_at.is_(None)).order_by(User.username)
     ).all()
-    return {
+    context = {
         "request": request,
         "user": current,
         "users": users,
         "roles": list(Role),
-        "companies": list_companies(db),
+        "companies": [],
         "error": error,
         "success": success,
-        **access_page_data(db, users),
     }
+    if _app_mode(request) != "lite":
+        context["companies"] = list_companies(db)
+        context.update(access_page_data(db, users))
+    return context
 
 
 @router.get("")
@@ -112,6 +121,8 @@ def update_tally_access(
     db: Session = Depends(get_db),
 ):
     current = require_permission(request, db, "users_manage")
+    if _app_mode(request) == "lite":
+        raise HTTPException(status_code=404, detail="Tally access is managed on Setuora Master.")
     target = db.get(User, user_id)
     if not target or target.deleted_at:
         return RedirectResponse("/users?error=user_not_found", status_code=303)

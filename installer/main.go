@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	repositoryURL = "https://github.com/Dijo-404/Proj_Setu.git"
+	repositoryURL = "https://github.com/Setuora/Setuora-Lite.git"
 	defaultBranch = "main"
 )
 
@@ -601,7 +601,8 @@ func isSetuoraRemote(remote string) bool {
 	case strings.HasPrefix(normalized, "git@github.com:"):
 		normalized = "github.com/" + strings.TrimPrefix(normalized, "git@github.com:")
 	}
-	return normalized == "github.com/dijo-404/proj_setu"
+	return normalized == "github.com/setuora/setuora-lite" ||
+		normalized == "github.com/dijo-404/proj_setu"
 }
 
 func powershellQuote(value string) string {

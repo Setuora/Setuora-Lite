@@ -39,6 +39,7 @@ from app.services.inventory import (
     update_batch_item_rate,
     update_product_rate_in_batch,
 )
+from app.services.master_sync import enqueue_batch_submitted_event
 from app.services.preinvoice import sale_preinvoice_pdf
 from app.services.access_control import role_has_access
 from app.services.settings import get_active_company, get_all_settings
@@ -346,12 +347,26 @@ def party_ledger_is_allowed(db: Session, user, party_name: str) -> bool:
     return allowed is None or resource_key(party_name) in allowed
 
 
-def batch_permission_context(db: Session, user, batch: Batch) -> dict[str, bool]:
+def batch_permission_context(
+    request: Request,
+    db: Session,
+    user,
+    batch: Batch,
+) -> dict[str, bool]:
+    lite_mode = request_app_mode(request) == "lite"
     action_key = action_key_for_batch(BatchType(batch.batch_type))
     can_edit = role_has_access(db, user.role, action_key)
     can_fefo = can_edit and role_has_access(db, user.role, "fefo_pick", {"edit", "yes"})
-    can_tally_xml = role_has_access(db, user.role, "tally_xml", {"edit", "yes"})
-    can_tally_excel_export = has_any_role(user.role, ADMIN_ROLES) and role_has_access(
+    can_tally_xml = not lite_mode and role_has_access(
+        db,
+        user.role,
+        "tally_xml",
+        {"edit", "yes"},
+    )
+    can_tally_excel_export = not lite_mode and has_any_role(
+        user.role,
+        ADMIN_ROLES,
+    ) and role_has_access(
         db,
         user.role,
         "tally_excel_export",
@@ -362,11 +377,28 @@ def batch_permission_context(db: Session, user, batch: Batch) -> dict[str, bool]
         "can_fefo": can_fefo,
         "can_tally_xml": can_tally_xml,
         "can_tally_excel_export": can_tally_excel_export,
-        "can_tally_excel_import": can_fefo,
-        "can_retry_sync": role_has_access(db, user.role, "tally_sync_retry", {"edit", "yes"}),
-        "can_view_attempts": role_has_access(db, user.role, "tally_attempts"),
+        "can_tally_excel_import": not lite_mode and can_fefo,
+        "can_retry_sync": not lite_mode
+        and role_has_access(db, user.role, "tally_sync_retry", {"edit", "yes"}),
+        "can_view_attempts": not lite_mode
+        and role_has_access(db, user.role, "tally_attempts"),
         "can_view_batch_list": role_has_access(db, user.role, "batch_list"),
     }
+
+
+def request_app_mode(request: Request) -> str:
+    app = request.scope.get("app")
+    return str(
+        getattr(getattr(app, "state", None), "app_mode", "legacy")
+    ).strip().lower()
+
+
+def require_local_tally_mode(request: Request) -> None:
+    if request_app_mode(request) == "lite":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tally operations are available only on Setuora Master.",
+        )
 
 
 def parse_batch_type(value: str) -> BatchType:
@@ -840,7 +872,7 @@ def batch_detail(request: Request, batch_id: int, db: Session = Depends(get_db))
             "tally_accounting_required_fields": TALLY_ACCOUNTING_REQUIRED_EXPORT_FIELDS,
             "tally_accounting_deselected_fields": tally_accounting_default_deselected_fields(batch),
             "tally_excel_message": tally_excel_import_message(request),
-            **batch_permission_context(db, user, batch),
+            **batch_permission_context(request, db, user, batch),
             "error": None,
         },
     )
@@ -991,7 +1023,7 @@ def fefo_pick_into_batch(
                 "shelf_state": shelf_verification_state(batch),
                 "sale_return_state": sale_return_state(db, batch),
                 "can_manual_scan": can_use_manual_scan(db, user),
-                **batch_permission_context(db, user, batch),
+                **batch_permission_context(request, db, user, batch),
                 "fefo_error": str(exc),
             },
             status_code=400,
@@ -1074,12 +1106,16 @@ def submit_batch(request: Request, batch_id: int, db: Session = Depends(get_db))
     user = require_permission(request, db, action_key_for_batch(BatchType(batch.batch_type)))
     if batch.status != BatchStatus.DRAFT.value:
         return RedirectResponse(f"/batches/{batch.id}", status_code=303)
+    lite_mode = request_app_mode(request) == "lite"
     try:
         validate_sale_returns_complete(db, batch)
         validate_priced_batch(batch)
         apply_batch_statuses(db, batch, user)
         if batch.batch_type == BatchType.AUDIT.value:
             reconcile_audit_batch(db, batch)
+        if lite_mode:
+            batch.status = BatchStatus.PENDING_SYNC.value
+            enqueue_batch_submitted_event(db, batch, user=user)
     except (InventoryError, ValueError) as exc:
         db.rollback()
         return templates.TemplateResponse(
@@ -1095,18 +1131,20 @@ def submit_batch(request: Request, batch_id: int, db: Session = Depends(get_db))
                 "shelf_state": shelf_verification_state(batch),
                 "sale_return_state": sale_return_state(db, batch),
                 "can_manual_scan": can_use_manual_scan(db, user),
-                **batch_permission_context(db, user, batch),
+                **batch_permission_context(request, db, user, batch),
                 "error": str(exc),
             },
             status_code=400,
         )
     db.commit()
-    sync_batch(db, batch)
+    if not lite_mode:
+        sync_batch(db, batch)
     return RedirectResponse(f"/batches/{batch.id}", status_code=303)
 
 
 @router.post("/{batch_id}/retry")
 def retry_batch(request: Request, batch_id: int, db: Session = Depends(get_db)):
+    require_local_tally_mode(request)
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
@@ -1173,6 +1211,7 @@ def sale_preinvoice(request: Request, batch_id: int, db: Session = Depends(get_d
 
 @router.get("/{batch_id}/tally.xml")
 def tally_xml_preview(request: Request, batch_id: int, db: Session = Depends(get_db)):
+    require_local_tally_mode(request)
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
@@ -1206,6 +1245,7 @@ def tally_excel_export(
     party_ledger: str = "",
     db: Session = Depends(get_db),
 ):
+    require_local_tally_mode(request)
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
@@ -1244,6 +1284,7 @@ def tally_excel_import(
     upload: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    require_local_tally_mode(request)
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
@@ -1285,7 +1326,7 @@ def tally_excel_import(
                 "tally_excel_import_types": TALLY_EXCEL_IMPORT_BATCH_TYPES,
                 "tally_excel_export_types": TALLY_EXCEL_EXPORT_BATCH_TYPES,
                 "tally_excel_error": str(exc),
-                **batch_permission_context(db, user, batch),
+                **batch_permission_context(request, db, user, batch),
                 "error": None,
             },
             status_code=400,
@@ -1295,6 +1336,7 @@ def tally_excel_import(
 
 @router.get("/{batch_id}/sync-attempts/{attempt_id}")
 def sync_attempt_detail(request: Request, batch_id: int, attempt_id: int, db: Session = Depends(get_db)):
+    require_local_tally_mode(request)
     batch = db.get(Batch, batch_id)
     attempt = db.get(SyncAttempt, attempt_id)
     if not batch or not attempt or attempt.batch_id != batch.id:

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Transfer {{ transfer.transfer_uuid[:8]|upper }} - Setuora Lite{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">{{ transfer.direction|title }} franchise transfer</p>
+    <h1>{{ transfer.transfer_uuid[:8]|upper }}</h1>
+    <p>
+      {% if is_outbound %}
+      {{ transfer.local_franchise_code or 'This franchise' }} → {{ transfer.peer_code }}
+      {% else %}
+      {{ transfer.peer_code }} → {{ transfer.local_franchise_code or 'This franchise' }}
+      {% endif %}
+    </p>
+  </div>
+  <div class="actions">
+    <span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ') }}</span>
+    <a class="button" href="/transfers">All transfers</a>
+  </div>
+</section>
+
+{% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if transfer.last_error %}<div class="alert error">{{ transfer.last_error }}</div>{% endif %}
+
+<section class="split">
+  <article class="panel">
+    <h2>Manifest details</h2>
+    <dl class="details">
+      <dt>Full ID</dt><dd><code>{{ transfer.transfer_uuid }}</code></dd>
+      <dt>Direction</dt><dd>{{ transfer.direction }}</dd>
+      <dt>Other franchise</dt><dd>{{ transfer.peer_code }}</dd>
+      <dt>Created by</dt><dd>{{ transfer.created_by.username if transfer.created_by else 'Master command' }}</dd>
+      <dt>Created</dt><dd>{{ transfer.created_at.strftime('%d %b %Y %H:%M') }}</dd>
+      <dt>Dispatched</dt><dd>{{ transfer.dispatched_at.strftime('%d %b %Y %H:%M') if transfer.dispatched_at else '-' }}</dd>
+      <dt>Received</dt><dd>{{ transfer.received_at.strftime('%d %b %Y %H:%M') if transfer.received_at else '-' }}</dd>
+      <dt>Notes</dt><dd>{{ transfer.notes or '-' }}</dd>
+    </dl>
+  </article>
+
+  <article class="panel">
+    <h2>{{ 'Build manifest' if is_draft else 'Receipt progress' if not is_outbound else 'Network progress' }}</h2>
+    {% if is_draft %}
+    <p>Scan only serials currently in stock. Dispatch changes them to <strong>IN TRANSIT</strong> in one transaction.</p>
+    {% elif is_receivable %}
+    <p><strong>{{ scanned_count }}</strong> scanned, <strong>{{ received_count }}</strong> received, <strong>{{ transfer.items|length }}</strong> in the manifest.</p>
+    {% elif is_outbound %}
+    <p>Master will notify this franchise as the destination confirms receipt. Source records remain unavailable while in transit.</p>
+    {% else %}
+    <p><strong>{{ received_count }}</strong> of <strong>{{ transfer.items|length }}</strong> serials received.</p>
+    {% endif %}
+  </article>
+</section>
+
+{% if is_draft or is_receivable %}
+<section class="panel">
+  <div class="step-heading">
+    <div>
+      <h2>{{ 'Scan stock into manifest' if is_draft else 'Scan received stock' }}</h2>
+      <p>{{ 'Each serial must belong to this franchise and be in stock.' if is_draft else 'Only serials in the incoming Master manifest are accepted.' }}</p>
+    </div>
+  </div>
+  <form
+    id="scan-form"
+    method="post"
+    action="/transfers/{{ transfer.id }}/{{ 'items' if is_draft else 'receipt-scans' }}"
+    class="search"
+    data-can-manual="true"
+  >
+    <input id="serial-input" name="serial_number" autocomplete="off" placeholder="Scan or type serial number" required>
+    <input id="scan-source" name="scan_source" type="hidden" value="manual">
+    <button class="button primary" type="submit">Add serial</button>
+  </form>
+  <div id="scanner-box" class="scanner-box">
+    <video id="scanner-video" playsinline muted></video>
+    <div class="scan-overlay">
+      <div class="scan-line"></div>
+      <div class="scan-corners">
+        <span class="corner tl"></span><span class="corner tr"></span>
+        <span class="corner bl"></span><span class="corner br"></span>
+      </div>
+      <p class="scan-label">Align a QR or barcode inside the frame</p>
+    </div>
+  </div>
+  <div id="scanner-tools" class="scanner-tools">
+    <button id="camera-button" class="button primary" type="button">Start scanning</button>
+  </div>
+  <p id="scan-status-label" class="muted">Camera is off</p>
+  <span id="scan-count" class="muted" data-count="{{ transfer.items|length if is_draft else scanned_count }}">{{ transfer.items|length if is_draft else scanned_count }} scanned</span>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="page-head compact">
+    <div><h2>Serial manifest</h2><p>{{ transfer.items|length }} item(s)</p></div>
+    <div class="actions">
+      {% if is_draft %}
+      <form method="post" action="/transfers/{{ transfer.id }}/dispatch">
+        <button class="button success" type="submit" {% if not transfer.items %}disabled{% endif %}>Dispatch transfer</button>
+      </form>
+      {% elif is_receivable %}
+      <form method="post" action="/transfers/{{ transfer.id }}/receive">
+        <button class="button success" type="submit" {% if scanned_count == received_count %}disabled{% endif %}>Receive scanned stock</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Serial</th><th>Product</th><th>Scanned</th><th>Received</th><th></th></tr></thead>
+      <tbody>
+        {% for item in transfer.items|sort(attribute='manifest_serial_number') %}
+        <tr>
+          <td><code>{{ item.manifest_serial_number }}</code></td>
+          <td>{{ item.product_code }}<small>{{ item.product_name }}</small></td>
+          <td>{{ 'Yes' if item.scanned else '-' }}</td>
+          <td>{{ 'Yes' if item.received else '-' }}</td>
+          <td>
+            {% if is_draft %}
+            <form method="post" action="/transfers/{{ transfer.id }}/items/{{ item.id }}/delete">
+              <button class="button small ghost" type="submit">Remove</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No serials in this manifest</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if is_draft or is_receivable %}
+<script src="/static/zxing.min.js"></script>
+<script src="/static/scanner.js?v=20260729-transfers-1"></script>
+{% endif %}
+{% endblock %}

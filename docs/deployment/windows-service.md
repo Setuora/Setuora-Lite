@@ -1,5 +1,11 @@
 # Windows Service Guide
 
+> **Legacy migration reference only.** New and connected Setuora Lite
+> installations use Docker Compose, Caddy, and the outbound-only Tailscale
+> service documented in [installation-guide.md](installation-guide.md). NSSM
+> does not provide the required Tailscale enrollment or reproducible
+> cross-platform lifecycle.
+
 Use NSSM to run Setuora automatically after reboot. The easier path is to run
 `Setuora.exe setup` as Administrator; automatic Setuora and Caddy services are
 the default. Use this guide when installing or repairing the service manually.

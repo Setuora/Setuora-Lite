@@ -12,7 +12,14 @@ import threading
 from app.config import PROJECT_ROOT, get_settings
 
 
-ENV_FILE = PROJECT_ROOT / ".env"
+ENV_FILE = Path(
+    os.getenv(
+        "BACKUP_SETTINGS_FILE",
+        str(PROJECT_ROOT / "data" / "backup-settings.env"),
+    )
+).expanduser()
+if not ENV_FILE.is_absolute():
+    ENV_FILE = (PROJECT_ROOT / ENV_FILE).resolve()
 BACKUP_ENV_KEYS = (
     "AUTOMATIC_BACKUPS_ENABLED",
     "BACKUP_DIRECTORY",
@@ -202,6 +209,28 @@ def update_backup_settings(
     else:
         offsite_dir = None
 
+    settings = get_settings()
+    if getattr(settings, "container_deployment", False):
+        data_root = sqlite_database_path().parent.resolve()
+        try:
+            backup_dir.relative_to(data_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Container backup folders must stay inside {data_root}."
+            ) from exc
+        if offsite_dir is not None:
+            raise ValueError(
+                "Off-machine paths are managed by the host backup system in "
+                "the self-hosted deployment."
+            )
+
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        if offsite_dir:
+            offsite_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ValueError(f"Backup folder is not writable: {exc}") from exc
+
     _persist_env_values(
         {
             "AUTOMATIC_BACKUPS_ENABLED": "true" if enabled else "false",
@@ -212,9 +241,6 @@ def update_backup_settings(
         }
     )
 
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    if offsite_dir:
-        offsite_dir.mkdir(parents=True, exist_ok=True)
     return backup_status()
 
 

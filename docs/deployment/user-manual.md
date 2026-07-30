@@ -1,6 +1,9 @@
 # User Manual
 
-Setuora is used from a browser on the factory LAN. Staff sign in, scan serial QR labels, and submit stock movements. Tally remains the accounting and inventory master; Setuora keeps serial-level traceability and posts only the supported voucher types after admin validation.
+Setuora Lite is used from a browser on the franchise LAN. Staff sign in, scan
+serial QR labels, and submit stock movements. Lite keeps local serial-level
+traceability and synchronizes durable events with Setuora Master. Master alone
+owns Tally posting and reconciliation.
 
 ## Common Navigation
 
@@ -8,12 +11,16 @@ Setuora is used from a browser on the factory LAN. Staff sign in, scan serial QR
 - `Batches`: purchase, sale, audit, sales return, purchase return, issue, and all batches.
 - `Serials`: search serials, view serial history, and open label pages.
 - `Reports`: admin-only scan and transaction reports with Excel exports.
+- `Transfers`: dispatch stock to another enrolled franchise and receive incoming
+  transfer manifests.
 - `Barcodes`: admin-only assignment and replacement tools.
-- `Admin`: products, expiry, settings, maintenance, and users.
+- `Admin`: products, expiry, Master connection, role access, maintenance, and
+  users.
 
 ## Roles
 
-- `admin` and `super_admin`: full setup, products, labels, assignment, replacement, reports, Tally settings, sync retry, maintenance, and users.
+- `admin` and `super_admin`: full setup, products, labels, assignment,
+  replacement, transfers, reports, Master sync retry, maintenance, and users.
 - `purchase`: purchase and purchase-return batches.
 - `sales`: sale and sales-return batches.
 - `directors`: directors reports and timed audit assignment.
@@ -25,27 +32,23 @@ Admins can open `Settings` -> `Role access` to review and change which pages are
 
 Only super admins can delete users. Deleted users with old batches, scans, or reports are removed from the Users list and cannot log in, but their historical records are kept.
 
-To limit Tally data for a user, open `Users`, click `Tally access`, and assign the
-allowed company profiles, ledgers, and Tally usernames. Tally usernames are
-discovered from saved sales vouchers and can also be entered manually. An empty
-section remains unrestricted for backward compatibility; super admins are always
-unrestricted.
-
 ## Admin Setup
 
-1. Open `Settings`.
-2. Add or activate a company profile.
-3. Enter exact Tally names for company, voucher types, ledgers, GST ledgers, and round-off ledger.
-4. Keep `Enable Tally sync` off until setup is validated.
-5. Open `Products` and create product masters with exact Tally stock item names.
-6. Open `Tally Check`. Click a company name to edit its Tally settings in the
-   popup. Click `Load from Tally` to select a loaded company, choose exact ledger
-   names in the settings fields, and review the Sales Book for a selected date
-   range. For the active company, use the same popup to test the gateway and
-   confirm each required master only after comparing it with Tally.
-7. Create named users from `Users`, then use `Tally access` to assign any required company, ledger, and Tally-user restrictions.
+1. Confirm the permanent franchise code and Master URL shown under
+   `Master connection`.
+2. Confirm the deployment's connection verification succeeded and that Master
+   shows this franchise online with sequence zero.
+3. For an existing-data cutover, queue and verify the one-time active inventory
+   baseline before ordinary transactions. A greenfield site begins from the
+   explicitly approved empty baseline.
+4. Open `Products` and create product masters with the exact Tally stock item
+   name and complete HSN, GST, unit, and rate metadata that Master needs.
+5. Create named users from `Users` and assign only the required operational
+   page/action permissions under `Role access`.
+6. Keep the Master connection page free of failed or blocked events before
+   declaring the node live.
 
-Settings fields auto-save while editing. The sync checkbox is saved only by the `Save settings` button and is blocked until Tally Check is complete.
+There is no Tally Settings or Tally Check page in Lite.
 
 ## Products and Labels
 
@@ -144,7 +147,9 @@ It is clearly marked as provisional and is not the final statutory GST invoice.
 - `Purchase return`: scan or FEFO-pick in-stock serials being sent back to a supplier.
 - `Issue`: scan or FEFO-pick in-stock serials issued for samples, office use, damage, marketing, production, or other reasons.
 
-Sales-return batches can be posted to Tally as Credit Note vouchers. Purchase-return and issue batches update local serial status, but their Tally XML is intentionally not posted until the client's exact voucher format is validated.
+Eligible events are queued and posted later by Master according to its accepted
+Tally configuration. Lite's local completion and Master acknowledgement do not
+mean that Tally accepted a voucher.
 
 ## Expiry Control
 
@@ -166,7 +171,7 @@ Admins can open `Reports` to review:
 - scan history
 - transaction history
 - detailed missing-stock findings from audits, including serial, product, warehouse, storage location, product batch, and expiry
-- pending and failed sync batches
+- pending and failed Master-sync batches
 - expiry summary context
 - Excel exports
 
@@ -179,6 +184,8 @@ Open a serial detail page to see the full scan and transaction history for one s
 3. Click `Download backup`.
 4. Store the downloaded `.db` file safely.
 
-Setuora also creates verified automatic backups into `data/backups/` by default,
-keeps the latest 14 files, and can copy them to another drive or network share
-when `BACKUP_OFFSITE_DIRECTORY` is configured. Keep a separate copy of `.env`.
+Setuora also creates verified automatic backups in the persistent application
+volume and keeps the latest 14 files by default. The supported Compose stack
+does not mount arbitrary paths from `BACKUP_OFFSITE_DIRECTORY`; use reviewed
+host/volume backup software to copy verified backups off-machine. Keep a
+separate encrypted copy of `.env`.

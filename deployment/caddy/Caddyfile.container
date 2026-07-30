@@ -1,0 +1,11 @@
+{
+	admin off
+	persist_config off
+	skip_install_trust
+}
+
+https://{$SETUORA_LAN_HOSTNAME:localhost} {
+	tls internal
+	encode zstd gzip
+	reverse_proxy setuora:8000
+}

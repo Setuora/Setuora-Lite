@@ -1,6 +1,7 @@
 from fastapi.templating import Jinja2Templates
 from jinja2 import Undefined
 
+from app.config import get_settings
 from app.database import SessionLocal
 from app.models import has_any_role
 from app.services.access_control import configured_role_has_access, landing_path_for, role_has_access
@@ -19,6 +20,7 @@ def csp_nonce(request=None) -> str:
 
 
 templates.env.globals["csp_nonce"] = csp_nonce
+templates.env.globals["app_mode"] = get_settings().app_mode
 
 
 def role_can(subject, access_key: str) -> bool:

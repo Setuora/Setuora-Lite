@@ -4,20 +4,22 @@ import "testing"
 
 func TestSetuoraRemoteVariants(t *testing.T) {
 	valid := []string{
+		"https://github.com/Setuora/Setuora-Lite.git",
+		"https://github.com/Setuora/Setuora-Lite/",
+		"git@github.com:Setuora/Setuora-Lite.git",
+		"ssh://git@github.com/Setuora/Setuora-Lite.git",
+		// Keep the original remote valid so existing installations can migrate.
 		"https://github.com/Dijo-404/Proj_Setu.git",
-		"https://github.com/Dijo-404/Proj_Setu/",
-		"git@github.com:Dijo-404/Proj_Setu.git",
-		"ssh://git@github.com/Dijo-404/Proj_Setu.git",
 	}
 	for _, remote := range valid {
 		if !isSetuoraRemote(remote) {
 			t.Errorf("expected valid Setuora remote: %s", remote)
 		}
 	}
-	if isSetuoraRemote("https://github.com/example/Proj_Setu.git") {
+	if isSetuoraRemote("https://github.com/example/Setuora-Lite.git") {
 		t.Fatal("accepted an unrelated repository")
 	}
-	if isSetuoraRemote("http://github.com/Dijo-404/Proj_Setu.git") {
+	if isSetuoraRemote("http://github.com/Setuora/Setuora-Lite.git") {
 		t.Fatal("accepted an insecure HTTP repository")
 	}
 }

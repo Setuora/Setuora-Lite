@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Master connection - Setuora Lite{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Setuora Lite</p>
+    <h1>Master connection</h1>
+    <p>Franchise events are kept locally until Master acknowledges them.</p>
+  </div>
+  <form method="post" action="/master-connection/sync">
+    <button class="button primary" type="submit" {% if not sync_enabled or configuration_error %}disabled{% endif %}>Sync now</button>
+  </form>
+</section>
+
+{% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if configuration_error %}<div class="alert error">{{ configuration_error }}</div>{% endif %}
+{% if not sync_enabled %}<div class="alert warn">Master synchronization is disabled. Local events will remain safely queued.</div>{% endif %}
+
+<section class="panel">
+  <div class="section-title">
+    <div>
+      <h2>Node initialization</h2>
+      <p class="muted">Run exactly once, before this franchise records its first normal outbox event.</p>
+    </div>
+  </div>
+  <p>
+    {{ initial_inventory_count }} active GENERATED/IN_STOCK QR(s) are eligible.
+    A stocked node queues an inventory snapshot; an empty new node queues an
+    explicit empty heartbeat. Master will still reject a serial collision or
+    ownership conflict.
+  </p>
+  {% if outbox_total == 0 %}
+  <form method="post" action="/master-connection/initialize-inventory" onsubmit="return confirm('Initialize this franchise now? This one-time baseline must precede every normal event.');">
+    <button class="button primary" type="submit" {% if franchise_code == 'Not configured' %}disabled{% endif %}>Initialize node</button>
+  </form>
+  {% else %}
+  <p class="muted">Initialization is locked because this node already has {{ outbox_total }} outbox event(s). Do not delete or resequence them.</p>
+  {% endif %}
+</section>
+
+<section class="metric-grid">
+  <div class="metric"><span>Pending</span><strong>{{ counts.get('PENDING', 0) }}</strong></div>
+  <div class="metric warn"><span>Retrying / failed</span><strong>{{ counts.get('FAILED', 0) }}</strong></div>
+  <div class="metric"><span>Sending</span><strong>{{ counts.get('SENDING', 0) }}</strong></div>
+  <div class="metric"><span>Delivered</span><strong>{{ counts.get('SENT', 0) }}</strong></div>
+</section>
+
+<section class="split">
+  <article class="panel">
+    <h2>Connection</h2>
+    <dl class="details">
+      <dt>Franchise</dt><dd>{{ franchise_code }}</dd>
+      <dt>Master URL</dt><dd>{{ master_url }}</dd>
+      <dt>Credential</dt><dd>{{ 'Configured' if api_key_configured else 'Not configured' }}</dd>
+      <dt>Background sync</dt><dd>{{ 'Enabled' if sync_enabled else 'Disabled' }}</dd>
+      <dt>Interval</dt><dd>{{ interval_seconds }} seconds</dd>
+      <dt>Last delivered</dt><dd>{{ last_sent.sent_at.strftime('%d %b %Y %H:%M') if last_sent and last_sent.sent_at else '-' }}</dd>
+    </dl>
+    <p class="muted">The node credential is never shown in this screen.</p>
+  </article>
+
+  <article class="panel">
+    <h2>Recent commands</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Command</th><th>Status</th><th>Received</th></tr></thead>
+        <tbody>
+          {% for command in recent_commands %}
+          <tr>
+            <td>{{ command.command_type }}</td>
+            <td><span class="status {{ command.status|lower }}">{{ command.status }}</span></td>
+            <td>{{ command.received_at.strftime('%d %b %Y %H:%M') }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="empty">No commands received</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <h2>Event outbox</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Sequence</th><th>Event</th><th>Reference</th><th>Status</th><th>Attempts</th><th>Last error</th><th>Created</th><th></th></tr></thead>
+      <tbody>
+        {% for event in recent_events %}
+        <tr>
+          <td>{{ event.id }}</td>
+          <td>{{ event.event_type }}</td>
+          <td>{{ event.aggregate_id }}</td>
+          <td><span class="status {{ event.status|lower }}">{{ event.status }}</span></td>
+          <td>{{ event.attempts }}</td>
+          <td>{{ event.last_error or '-' }}</td>
+          <td>{{ event.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td>
+            {% if event.status == 'FAILED' %}
+            <form method="post" action="/master-connection/events/{{ event.id }}/retry">
+              <button class="button small" type="submit">Retry</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="empty">No local events queued yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

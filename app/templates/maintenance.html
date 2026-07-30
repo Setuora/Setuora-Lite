@@ -31,7 +31,11 @@
   </dl>
   <p class="muted">The backup uses SQLite's backup API, so pending WAL changes are included in the downloaded file.</p>
   <p class="muted">Each automatic backup is opened and checked with SQLite integrity and foreign-key verification before it is kept.</p>
+  {% if backup_config.container_deployment %}
+  <p class="muted">Scheduling and retention settings are stored in the persistent data volume. Use the reviewed host backup system to copy verified backups off-machine.</p>
+  {% else %}
   <p class="muted">Configure BACKUP_OFFSITE_DIRECTORY for a verified copy on another drive or network share. Keep a separate copy of .env.</p>
+  {% endif %}
 </section>
 
 {% if has_role(user, 'super_admin') and role_can(user, 'database_reset') %}
@@ -46,9 +50,11 @@
       <label>Backup folder
         <input name="backup_directory" value="{{ backup_config.backup_directory }}" required>
       </label>
+      {% if not backup_config.container_deployment %}
       <label>Off-machine copy
         <input name="backup_offsite_directory" value="{{ backup_config.backup_offsite_directory }}" placeholder="Drive path or network share">
       </label>
+      {% endif %}
       <label>Schedule
         <input name="backup_interval_hours" type="number" min="1" max="168" step="1" value="{{ backup_config.backup_interval_hours }}" required>
       </label>
@@ -62,6 +68,7 @@
   </form>
 </section>
 
+{% if not (app_mode == 'lite' and backup_config.master_sync_enabled) %}
 <section class="panel">
   <div class="section-title"><h2>Import backup</h2></div>
   <div class="backup-import-grid">
@@ -131,8 +138,23 @@
     </form>
   </div>
 </section>
+{% else %}
+<section class="panel">
+  <div class="section-title"><h2>Protected node recovery</h2></div>
+  <p>
+    Database reset and restore are disabled while this Lite node is connected
+    to Setuora Master. Rewinding this database would invalidate its ordered
+    event cursor and Master stock ownership.
+  </p>
+  <p class="muted">
+    Keep verified backups, but use a reviewed recovery procedure with Master
+    cursor reconciliation and inventory re-enrollment.
+  </p>
+</section>
+{% endif %}
 {% endif %}
 
+{% if not (app_mode == 'lite' and backup_config.master_sync_enabled) %}
 <section class="panel">
   <div class="section-title"><h2>Restore procedure</h2></div>
   <div class="checklist">
@@ -144,5 +166,6 @@
     <div>Open Dashboard, Products, and Reports to confirm the restored data is visible.</div>
   </div>
 </section>
+{% endif %}
 <script src="/static/password-toggle.js"></script>
 {% endblock %}

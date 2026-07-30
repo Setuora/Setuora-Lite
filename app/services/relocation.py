@@ -21,6 +21,7 @@ from app.models import (
     User,
     WarehouseLevel,
 )
+from app.services.master_sync import MasterSyncError
 
 
 MOVABLE_STATUSES = {SerialStatus.IN_STOCK.value, SerialStatus.RETURNED.value}
@@ -255,6 +256,7 @@ def relocate_stock(
         raise RelocationError("Add at least one product to the move")
 
     relocations: list[StockRelocation] = []
+    moved_serials: list[Serial] = []
     claimed_ids: set[int] = set()
     try:
         for item in items:
@@ -319,7 +321,14 @@ def relocate_stock(
 
             note = f"{previous_snapshot} -> {destination.full_path}"
             for serial in serials:
+                # synchronize_session=False protects the compare-and-swap
+                # update; keep the loaded snapshot aligned for the outbox.
+                serial.location_id = destination.id
+                serial.location = destination
+                serial.warehouse = destination.warehouse
+                serial.warehouse_level = destination.warehouse_level
                 claimed_ids.add(serial.id)
+                moved_serials.append(serial)
                 db.add(RelocationSerial(relocation_id=relocation.id, serial_id=serial.id))
                 db.add(
                     ScanLog(
@@ -345,10 +354,39 @@ def relocate_stock(
                     )
                 )
             relocations.append(relocation)
+        from app.config import get_settings
+
+        if get_settings().app_mode == "lite" and moved_serials:
+            db.flush()
+            from app.services.master_sync import enqueue_outbox_event, network_event_item
+
+            # The v1 contract accepts at most 5,000 serialized items per event.
+            # Keep every chunk in the same local transaction and sequence them
+            # in deterministic scan order.
+            reference = relocations[0].reference_number
+            for offset in range(0, len(moved_serials), 5000):
+                chunk = moved_serials[offset : offset + 5000]
+                part = offset // 5000 + 1
+                aggregate_id = f"{reference}:PART-{part}"
+                enqueue_outbox_event(
+                    db,
+                    event_type="STOCK_SNAPSHOT",
+                    aggregate_type="RELOCATION",
+                    aggregate_id=aggregate_id,
+                    payload={
+                        "reference": aggregate_id,
+                        "actor": user.username,
+                        "reason_code": "RELOCATION",
+                        "items": [network_event_item(serial) for serial in chunk],
+                    },
+                )
         db.commit()
     except RelocationError:
         db.rollback()
         raise
+    except MasterSyncError as exc:
+        db.rollback()
+        raise RelocationError(str(exc)) from exc
     except Exception as exc:
         db.rollback()
         raise RelocationError("The relocation could not be completed. No stock was moved") from exc

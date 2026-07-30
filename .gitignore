@@ -10,6 +10,7 @@ data/*.db-*
 data/*.db-shm
 data/*.db-wal
 data/backups/
+data/backup-settings.env
 data/schema-backups/
 data/secret_key
 .pytest_cache/
@@ -24,4 +25,5 @@ deployment/caddy/caddy.exe
 deployment/caddy/Caddyfile
 deployment/caddy/setuora-caddy-root.crt
 deployment/caddy/state/
+setuora-lite-root-ca.crt
 deployment/windows/nssm.exe

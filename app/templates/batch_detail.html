@@ -180,9 +180,13 @@
       <dt>{{ 'Sale started by' if batch.batch_type == 'SALE' else 'Created by' }}</dt><dd>{{ batch.user.username }}</dd>
       <dt>Created</dt><dd>{{ report_date(batch.created_at) }}</dd>
       <dt>Voucher number</dt><dd>{{ batch_voucher_number(batch) }}</dd>
+      {% if app_mode == 'lite' %}
+      <dt>Master delivery</dt><dd>{{ batch.status|replace('_', ' ') }}</dd>
+      {% else %}
       <dt>Tally reference</dt><dd>{{ batch.tally_reference or '-' }}</dd>
       <dt>Retry count</dt><dd>{{ batch.retry_count or 0 }}</dd>
       <dt>Last retry</dt><dd>{{ report_date(batch.last_retry_at) if batch.last_retry_at else '-' }}</dd>
+      {% endif %}
     </dl>
     {% if batch.status == 'DRAFT' and can_edit_batch %}
     <form method="post" action="/batches/{{ batch.id }}/submit">

@@ -5,7 +5,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import ScanLog, Serial, SerialStatus, TransactionType, User
-from app.services.inventory import InventoryError, generate_serials, log_inventory_transaction, normalize_serial
+from app.services.inventory import (
+    InventoryError,
+    franchise_serial_prefix,
+    generate_serials,
+    log_inventory_transaction,
+    normalize_serial,
+)
+from app.services.master_sync import (
+    MasterSyncError,
+    enqueue_outbox_event,
+    network_event_item,
+)
 
 
 REPLACEABLE_STOCK_STATUSES = {
@@ -34,8 +45,15 @@ def replace_barcode_serial(db: Session, user: User, old_serial_number: str, new_
     original_status = SerialStatus(old_serial.status)
     replacement_status = replacement_status_for(original_status)
     if new_serial_number and new_serial_number.strip():
+        normalized_replacement = normalize_serial(new_serial_number)
+        required_replacement = franchise_serial_prefix(normalized_replacement)
+        if required_replacement != normalized_replacement:
+            raise InventoryError(
+                f"Replacement serial must use the franchise namespace: "
+                f"{required_replacement}"
+            )
         replacement = Serial(
-            serial_number=normalize_serial(new_serial_number),
+            serial_number=normalized_replacement,
             product_id=old_serial.product_id,
             status=replacement_status.value,
             active=True,
@@ -105,7 +123,32 @@ def replace_barcode_serial(db: Session, user: User, old_serial_number: str, new_
         notes=f"Replaces: {old_serial.serial_number}. {reason or ''}".strip(),
     )
     try:
+        from app.config import get_settings
+
+        if get_settings().app_mode == "lite":
+            # Master must learn both halves atomically: the retired QR is no
+            # longer stock, and its replacement represents the same unit.
+            db.flush()
+            reference = f"QR-REPLACE-{old_serial.id}-{replacement.id}"
+            enqueue_outbox_event(
+                db,
+                event_type="STOCK_SNAPSHOT",
+                aggregate_type="QR_REPLACEMENT",
+                aggregate_id=reference,
+                payload={
+                    "reference": reference,
+                    "actor": user.username,
+                    "reason_code": "QR_REPLACEMENT",
+                    "items": [
+                        network_event_item(old_serial),
+                        network_event_item(replacement),
+                    ],
+                },
+            )
         db.commit()
+    except MasterSyncError as exc:
+        db.rollback()
+        raise InventoryError(str(exc)) from exc
     except Exception:
         db.rollback()
         raise

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#faf9f5">
-  <title>{% block title %}Setuora Barcode Tally Bridge{% endblock %}</title>
+  <title>{% block title %}{{ 'Setuora Lite' if app_mode == 'lite' else 'Setuora Barcode Tally Bridge' }}{% endblock %}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css?v=20260716-gateway-result-1">
 </head>
@@ -18,6 +18,9 @@
       <div class="subnav__inner">
       {% if role_can(user, 'page_dashboard') and role_can(user, 'dashboard_data') %}
       <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}">Dashboard</a>
+      {% endif %}
+      {% if app_mode == 'lite' and has_role(user, 'super_admin', 'admin', 'warehouse_manager') %}
+      <a href="/transfers" class="{{ 'active' if request.url.path.startswith('/transfers') else '' }}">Franchise transfers</a>
       {% endif %}
       {% set nav_batch_type = request.query_params.get('batch_type', '') %}
       {% if batch is defined and batch %}{% set nav_batch_type = batch.batch_type %}{% endif %}
@@ -97,8 +100,9 @@
           {% if role_can(user, 'page_maintenance') and role_can(user, 'backup_data') %}<a href="/maintenance">Maintenance</a>{% endif %}
           {% if role_can(user, 'page_products') and role_can(user, 'product_master') %}<a href="/products">Products</a>{% endif %}
           {% if has_role(user, 'super_admin') %}<a href="/settings/access">Role access</a>{% endif %}
-          {% if role_can(user, 'page_settings') and role_can(user, 'settings_edit') %}<a href="/settings">Settings</a>{% endif %}
-          {% if can_use_tally_check %}<a href="/tally-check">Tally Check</a>{% endif %}
+          {% if app_mode == 'lite' and has_role(user, 'super_admin', 'admin') %}<a href="/master-connection">Master connection</a>{% endif %}
+          {% if app_mode != 'lite' and role_can(user, 'page_settings') and role_can(user, 'settings_edit') %}<a href="/settings">Settings</a>{% endif %}
+          {% if app_mode != 'lite' and can_use_tally_check %}<a href="/tally-check">Tally Check</a>{% endif %}
           {% if role_can(user, 'page_users') and role_can(user, 'users_manage') %}<a href="/users">Users</a>{% endif %}
         </div>
       </details>

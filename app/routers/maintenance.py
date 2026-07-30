@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 
@@ -23,12 +23,32 @@ from app.services.backup import (
 )
 from app.services.backup_worker import start_backup_worker, stop_backup_worker
 from app.services.database_reset import reset_database_and_cache
+from app.services.master_sync_worker import (
+    start_master_sync_worker,
+    stop_master_sync_worker,
+)
 from app.services.sync_worker import start_retry_worker, stop_retry_worker
 from app.templates import templates
 
 router = APIRouter(prefix="/maintenance")
 logger = logging.getLogger("setuora")
 MAX_BACKUP_UPLOAD_BYTES = 512 * 1024 * 1024
+
+
+def _deny_connected_lite_destructive_maintenance(request: Request) -> None:
+    settings = get_settings()
+    if (
+        request.app.state.app_mode == "lite"
+        and settings.master_sync_enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Reset and restore are disabled on a connected Lite node until "
+                "Master cursor reconciliation and inventory re-enrollment are "
+                "implemented."
+            ),
+        )
 
 
 @router.get("")
@@ -118,6 +138,7 @@ async def restore_existing_backup(
     authorization = _require_restore_authorization(request, db, super_admin_password, confirm_restore)
     if isinstance(authorization, RedirectResponse):
         return authorization
+    _deny_connected_lite_destructive_maintenance(request)
     try:
         backup_path = backup_choice_path(selected_backup)
     except RuntimeError:
@@ -136,6 +157,7 @@ async def restore_uploaded_backup(
     authorization = _require_restore_authorization(request, db, super_admin_password, confirm_restore)
     if isinstance(authorization, RedirectResponse):
         return authorization
+    _deny_connected_lite_destructive_maintenance(request)
     data = upload.file.read(MAX_BACKUP_UPLOAD_BYTES + 1)
     if not data:
         return RedirectResponse("/maintenance?error=restore_file_required", status_code=303)
@@ -156,6 +178,7 @@ async def reset_database(
     db: Session = Depends(get_db),
 ):
     user = require_user(request, db, {Role.SUPER_ADMIN})
+    _deny_connected_lite_destructive_maintenance(request)
     if confirm_reset.strip() != "RESET":
         return RedirectResponse("/maintenance?error=confirm_required", status_code=303)
     if not verify_password(super_admin_password, user.password_hash):
@@ -224,10 +247,16 @@ async def _restore_from_path(request: Request, db: Session, backup_path: Path):
 
 
 async def _stop_maintenance_workers(request: Request) -> None:
-    await stop_retry_worker(request.app)
+    if request.app.state.app_mode == "lite":
+        await stop_master_sync_worker(request.app)
+    else:
+        await stop_retry_worker(request.app)
     await stop_backup_worker(request.app)
 
 
 def _start_maintenance_workers(request: Request) -> None:
-    start_retry_worker(request.app)
+    if request.app.state.app_mode == "lite":
+        start_master_sync_worker(request.app)
+    else:
+        start_retry_worker(request.app)
     start_backup_worker(request.app)

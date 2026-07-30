@@ -1,8 +1,21 @@
 from datetime import date, datetime, timezone
 from enum import Enum
 import json
+from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    event as sqlalchemy_event,
+    inspect as sqlalchemy_inspect,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -87,6 +100,7 @@ class SerialStatus(str, Enum):
     MISSING = "MISSING"
     INVALID = "INVALID"
     REPLACED = "REPLACED"
+    IN_TRANSIT = "IN_TRANSIT"
 
 
 class BatchType(str, Enum):
@@ -122,6 +136,8 @@ class TransactionType(str, Enum):
     QR_ASSIGNMENT = "QR_ASSIGNMENT"
     QR_REPLACEMENT = "QR_REPLACEMENT"
     RELOCATION = "RELOCATION"
+    TRANSFER_OUT = "TRANSFER_OUT"
+    TRANSFER_IN = "TRANSFER_IN"
 
 
 class WarehouseLevel(str, Enum):
@@ -140,6 +156,40 @@ class BatchStatus(str, Enum):
     PENDING_SYNC = "PENDING_SYNC"
     FAILED = "FAILED"
     CLOSED = "CLOSED"
+
+
+class MasterOutboxStatus(str, Enum):
+    PENDING = "PENDING"
+    SENDING = "SENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+
+
+class MasterInboxStatus(str, Enum):
+    RECEIVED = "RECEIVED"
+    APPLIED = "APPLIED"
+    FAILED = "FAILED"
+
+
+class TransferDirection(str, Enum):
+    OUTBOUND = "OUTBOUND"
+    INBOUND = "INBOUND"
+
+
+class TransferStatus(str, Enum):
+    DRAFT = "DRAFT"
+    PENDING_MASTER = "PENDING_MASTER"
+    DISPATCHED = "DISPATCHED"
+    AWAITING_RECEIPT = "AWAITING_RECEIPT"
+    PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED"
+    RECEIVED = "RECEIVED"
+    FAILED = "FAILED"
+
+
+# Short aliases keep service and extension code readable while retaining
+# explicit database model names.
+OutboxStatus = MasterOutboxStatus
+InboxCommandStatus = MasterInboxStatus
 
 
 class User(Base):
@@ -471,6 +521,183 @@ class SyncAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
     batch: Mapped[Batch] = relationship(back_populates="sync_attempts")
+
+
+class MasterOutboxEvent(Base):
+    """An immutable event waiting to be delivered to Setuora Master.
+
+    SQLite's AUTOINCREMENT keyword is deliberately enabled: event ``id`` is
+    also the franchise-local ordering sequence and must never be reused after
+    a row is deleted.
+    """
+
+    __tablename__ = "master_outbox_events"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        index=True,
+        default=lambda: str(uuid4()),
+    )
+    event_type: Mapped[str] = mapped_column(String(120), index=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    aggregate_type: Mapped[str] = mapped_column(String(80), index=True)
+    aggregate_id: Mapped[str] = mapped_column(String(180), index=True)
+    batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("batches.id"),
+        nullable=True,
+        index=True,
+    )
+    payload_json: Mapped[str] = mapped_column(Text, active_history=True)
+    payload_sha256: Mapped[str] = mapped_column(String(64), active_history=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MasterOutboxStatus.PENDING.value,
+        index=True,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    sending_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    batch: Mapped[Batch | None] = relationship()
+
+    @property
+    def sequence(self) -> int:
+        return self.id
+
+    @property
+    def payload(self) -> dict:
+        return json.loads(self.payload_json)
+
+
+class MasterInboxCommand(Base):
+    """A durable idempotency record for a command received from Master."""
+
+    __tablename__ = "master_inbox_commands"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    command_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    command_type: Mapped[str] = mapped_column(String(120), index=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    payload_json: Mapped[str] = mapped_column(Text)
+    payload_sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MasterInboxStatus.RECEIVED.value,
+        index=True,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    @property
+    def payload(self) -> dict:
+        return json.loads(self.payload_json)
+
+
+@sqlalchemy_event.listens_for(MasterOutboxEvent, "before_update")
+def prevent_outbox_payload_mutation(_mapper, _connection, target: MasterOutboxEvent) -> None:
+    """Allow initial envelope finalization, then freeze its JSON and digest."""
+
+    state = sqlalchemy_inspect(target)
+    for field_name in ("payload_json", "payload_sha256"):
+        history = state.attrs[field_name].history
+        if not history.has_changes():
+            continue
+        prior_value = history.deleted[0] if history.deleted else None
+        if prior_value not in {None, ""}:
+            raise ValueError("Master outbox payloads are immutable after creation.")
+
+
+class LocalTransfer(Base):
+    __tablename__ = "local_transfers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    transfer_uuid: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        index=True,
+        default=lambda: str(uuid4()),
+    )
+    direction: Mapped[str] = mapped_column(String(16), index=True)
+    status: Mapped[str] = mapped_column(
+        String(40),
+        default=TransferStatus.DRAFT.value,
+        index=True,
+    )
+    local_franchise_code: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    peer_code: Mapped[str] = mapped_column(String(80), index=True)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+        index=True,
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    created_by: Mapped[User | None] = relationship()
+    items: Mapped[list["LocalTransferItem"]] = relationship(
+        back_populates="transfer",
+        cascade="all, delete-orphan",
+    )
+
+
+class LocalTransferItem(Base):
+    __tablename__ = "local_transfer_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "transfer_id",
+            "manifest_serial_number",
+            name="uq_local_transfer_manifest_serial",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    transfer_id: Mapped[int] = mapped_column(ForeignKey("local_transfers.id"), index=True)
+    serial_id: Mapped[int | None] = mapped_column(
+        ForeignKey("serials.id"),
+        nullable=True,
+        index=True,
+    )
+    manifest_serial_number: Mapped[str] = mapped_column(String(140), index=True)
+    product_code: Mapped[str] = mapped_column(String(80), index=True)
+    product_name: Mapped[str] = mapped_column(String(180))
+    scanned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    received: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    transfer: Mapped[LocalTransfer] = relationship(back_populates="items")
+    serial: Mapped[Serial | None] = relationship()
 
 
 class Setting(Base):
