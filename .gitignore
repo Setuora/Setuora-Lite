@@ -17,13 +17,6 @@ data/secret_key
 .coverage
 htmlcov/
 logs/
-docs/context/*.zip
-docs/context/*.7z
-docs/context/*.rar
+dist/
 CLAUDE.md
-deployment/caddy/caddy.exe
-deployment/caddy/Caddyfile
-deployment/caddy/setuora-caddy-root.crt
-deployment/caddy/state/
 setuora-lite-root-ca.crt
-deployment/windows/nssm.exe

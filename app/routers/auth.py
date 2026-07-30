@@ -9,7 +9,13 @@ from app.auth import SESSION_COOKIE, current_user, get_user_by_username
 from app.config import get_settings
 from app.database import get_db
 from app.models import LoginAudit
-from app.security import create_session_token, hash_password, verify_password
+from app.security import (
+    MAX_PASSWORD_LENGTH,
+    create_session_token,
+    hash_password,
+    password_hash_needs_upgrade,
+    verify_password,
+)
 from app.services.access_control import get_role_access_config, landing_path_for
 from app.templates import templates
 
@@ -50,8 +56,21 @@ def login(
 ):
     settings = get_settings()
     normalized = username.strip().lower()
+    audit_username = normalized[:80]
+    valid_shape = (
+        bool(normalized)
+        and len(normalized) <= 80
+        and len(password) <= MAX_PASSWORD_LENGTH
+    )
 
-    if recent_failed_logins(db, normalized, settings.login_lockout_minutes) >= settings.login_max_attempts:
+    if (
+        recent_failed_logins(
+            db,
+            audit_username,
+            settings.login_lockout_minutes,
+        )
+        >= settings.login_max_attempts
+    ):
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -63,15 +82,15 @@ def login(
             status_code=429,
         )
 
-    user = get_user_by_username(db, normalized)
-    if user and user.active:
+    user = get_user_by_username(db, normalized) if valid_shape else None
+    if user and user.active and not user.deleted_at:
         ok = verify_password(password, user.password_hash)
     else:
         verify_password(password, _DUMMY_PASSWORD_HASH)
         ok = False
     db.add(
         LoginAudit(
-            username=normalized,
+            username=audit_username,
             success=ok,
             ip_address=request.client.host if request.client else None,
             message="OK" if ok else "Invalid username or password",
@@ -86,12 +105,14 @@ def login(
             status_code=400,
         )
     user.last_login_at = datetime.now(timezone.utc)
+    if password_hash_needs_upgrade(user.password_hash):
+        user.password_hash = hash_password(password)
     db.commit()
     destination = "/account/password" if user.must_change_password else landing_path_for(get_role_access_config(db), user.role)
     redirect = RedirectResponse(destination, status_code=303)
     redirect.set_cookie(
         SESSION_COOKIE,
-        create_session_token(user.id),
+        create_session_token(user.id, user.session_version),
         max_age=settings.session_timeout_minutes * 60,
         httponly=True,
         samesite="lax",

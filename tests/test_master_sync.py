@@ -215,11 +215,26 @@ class _Response:
         self.status = status
         self._body = body
 
-    def read(self):
-        return self._body
+    def read(self, size=-1):
+        return self._body if size < 0 else self._body[:size]
 
     def close(self):
         pass
+
+
+def test_master_response_body_is_bounded(monkeypatch):
+    monkeypatch.setattr(
+        master_sync,
+        "get_settings",
+        lambda: _settings(master_request_timeout_seconds=3),
+    )
+    oversized = b"x" * (master_sync.MASTER_RESPONSE_MAX_BODY_BYTES + 1)
+
+    with pytest.raises(master_sync.MasterSyncError, match="5 MiB"):
+        master_sync._open_request(
+            object(),
+            opener=lambda _request, timeout: _Response(oversized, status=200),
+        )
 
 
 def _accepted_response(request, *, event_id=None, sequence=None, last_sequence=None):

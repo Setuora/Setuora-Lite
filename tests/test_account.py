@@ -78,6 +78,7 @@ def test_must_change_password_gate_redirects_protected_route():
 
 def test_change_password_clears_flag_and_updates_hash():
     client, Session, engine = _client_with_user(must_change=True)
+    old_token = create_session_token(1)
     try:
         response = client.post(
             "/account/password",
@@ -86,17 +87,25 @@ def test_change_password_clears_flag_and_updates_hash():
                 "new_password": "a-strong-new-pass",
                 "confirm_password": "a-strong-new-pass",
             },
-            cookies={SESSION_COOKIE: create_session_token(1)},
+            cookies={SESSION_COOKIE: old_token},
+        )
+        stale_session = client.get(
+            "/",
+            cookies={SESSION_COOKIE: old_token},
         )
         with Session() as db:
             user = db.get(User, 1)
             assert user.must_change_password is False
             assert verify_password("a-strong-new-pass", user.password_hash)
+            assert user.session_version == 1
     finally:
         app.dependency_overrides.clear()
         engine.dispose()
     assert response.status_code == 303
     assert response.headers["location"] == "/"
+    assert f"{SESSION_COOKIE}=" in response.headers["set-cookie"]
+    assert stale_session.status_code == 303
+    assert stale_session.headers["location"] == "/login"
 
 
 def test_change_password_rejects_short_password():

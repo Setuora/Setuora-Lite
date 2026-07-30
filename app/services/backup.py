@@ -437,7 +437,10 @@ def _remove_sqlite_sidecars(database_path: Path) -> None:
 
 
 def _reload_runtime_database() -> None:
+    from sqlalchemy import update
+
     from app.database import Base, SessionLocal, engine
+    from app.models import User
     from app.services.bootstrap import bootstrap
     from app.services.schema import ensure_runtime_schema
 
@@ -445,3 +448,7 @@ def _reload_runtime_database() -> None:
     ensure_runtime_schema(engine)
     with SessionLocal() as db:
         bootstrap(db)
+        db.execute(
+            update(User).values(session_version=User.session_version + 1)
+        )
+        db.commit()

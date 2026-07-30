@@ -84,6 +84,14 @@ requires Master's accepted cursor to match Lite's last `SENT` sequence and next
 sequence. Established nodes retain that identity binding across later
 offline-tolerant restarts.
 
+## Install Without Git
+
+For franchise delivery, build and send the platform-specific single-file
+installer described in [Client packages](client-packages.md). Linux receives
+one `.run` file and Windows receives one double-clickable `.cmd` file. The same
+package handles initial setup and later updates through the reviewed
+`deploy.py` workflow while preserving `.env` and all named Docker volumes.
+
 ## LAN Certificate
 
 Setup prints the LAN HTTPS URL and exported public CA path. Install that public
@@ -145,9 +153,10 @@ ignore it. Sold/issued history and pre-cutover reports require an explicit
 migration decision. Connected database rollback additionally requires Master
 cursor reconciliation; see [Backup and restore](backup-restore-guide.md).
 
-The old `Setuora.exe`, Windows scripts, host Caddy, and NSSM files remain only
-for examining/stopping an existing installation. They are not the supported
-path for a new connected Lite deployment.
+Legacy host-service files are intentionally not bundled with Lite. Complete any
+old NSSM/Python/Caddy shutdown and data export before installing the Docker
+package; use the operating system's service tools if the legacy source tree is
+no longer available.
 
 ## Validation
 

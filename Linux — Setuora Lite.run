@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+LATEST_INSTALLER=""
+
+for candidate in "$PROJECT_DIR"/dist/Setuora-Lite-*-linux.run; do
+  [ -f "$candidate" ] || continue
+  if [ -z "$LATEST_INSTALLER" ] || [ "$candidate" -nt "$LATEST_INSTALLER" ]; then
+    LATEST_INSTALLER="$candidate"
+  fi
+done
+
+if [ -z "$LATEST_INSTALLER" ]; then
+  echo "No Linux Setuora Lite installer was found in: $PROJECT_DIR/dist" >&2
+  echo "Build one with: python scripts/build_client_packages.py --version <version>" >&2
+  exit 1
+fi
+
+echo "Launching: $(basename -- "$LATEST_INSTALLER")"
+exec "$LATEST_INSTALLER"

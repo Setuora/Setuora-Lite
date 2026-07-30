@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PACKAGE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+cd "$PACKAGE_DIR"
+
+find_python() {
+  local candidate
+  for candidate in python3.11 python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 \
+      && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' \
+        >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker Engine is required. Install Docker Engine with Compose v2, then run this again." >&2
+  echo "Linux instructions: https://docs.docker.com/engine/install/" >&2
+  exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "Docker Compose v2 is required (the command must be: docker compose)." >&2
+  exit 1
+fi
+
+if ! PYTHON_COMMAND="$(find_python)"; then
+  echo "Python 3.11 or newer is required. Install it, then run this again." >&2
+  exit 1
+fi
+
+exec "$PYTHON_COMMAND" "$PACKAGE_DIR/deploy.py" "$@"

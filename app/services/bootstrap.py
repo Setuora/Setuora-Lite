@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.config import INSECURE_BOOTSTRAP_PASSWORDS, get_settings
 from app.models import Role, User, has_role
-from app.security import MIN_PASSWORD_LENGTH, hash_password, verify_password
+from app.security import hash_password, password_policy_error, verify_password
 from app.services.settings import clear_legacy_placeholder_settings, ensure_company_records, ensure_default_settings
 
 DEFAULT_ADMIN_PASSWORD = "admin123"
@@ -15,10 +15,11 @@ def _validate_first_admin_settings() -> None:
     password = settings.bootstrap_admin_password
     if not username:
         raise RuntimeError("BOOTSTRAP_ADMIN_USERNAME must be set before the first startup.")
-    if password in INSECURE_BOOTSTRAP_PASSWORDS or len(password) < MIN_PASSWORD_LENGTH:
+    policy_error = password_policy_error(password)
+    if password in INSECURE_BOOTSTRAP_PASSWORDS or policy_error:
         raise RuntimeError(
-            "Set BOOTSTRAP_ADMIN_PASSWORD to a unique password of at least "
-            f"{MIN_PASSWORD_LENGTH} characters before the first startup."
+            "Set BOOTSTRAP_ADMIN_PASSWORD to a unique password that satisfies "
+            f"the production policy. {policy_error or ''}".strip()
         )
 
 

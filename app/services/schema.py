@@ -130,6 +130,13 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
                 connection.execute(text("ALTER TABLE users ADD COLUMN deleted_at DATETIME"))
             if "must_change_password" not in user_columns:
                 connection.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT 0"))
+            if "session_version" not in user_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE users ADD COLUMN session_version "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
 
         if "tally_sales_voucher_cache" in inspector.get_table_names():
             voucher_cache_columns = {

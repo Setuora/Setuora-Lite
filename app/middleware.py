@@ -110,7 +110,10 @@ class SessionActivityMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         response.set_cookie(
             SESSION_COOKIE,
-            create_session_token(user_id),
+            create_session_token(
+                user_id,
+                getattr(request.state, "session_version", 0),
+            ),
             max_age=settings.session_timeout_minutes * 60,
             httponly=True,
             samesite="lax",

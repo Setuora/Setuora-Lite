@@ -42,6 +42,7 @@ INITIAL_INVENTORY_AGGREGATE_TYPE = "INITIAL_INVENTORY"
 INITIAL_INVENTORY_REFERENCE_SEGMENT = "INITIAL-INVENTORY"
 MASTER_EVENT_MAX_ITEMS = 5000
 MASTER_EVENT_MAX_BODY_BYTES = 5 * 1024 * 1024
+MASTER_RESPONSE_MAX_BODY_BYTES = 5 * 1024 * 1024
 MASTER_ERROR_MAX_BODY_BYTES = 64 * 1024
 MASTER_ERROR_MAX_TEXT_CHARS = 500
 MASTER_ERROR_MAX_DETAILS_CHARS = 700
@@ -760,7 +761,11 @@ def _open_request(
         status = getattr(response, "status", None)
         if status is None and hasattr(response, "getcode"):
             status = response.getcode()
-        body = response.read()
+        body = response.read(MASTER_RESPONSE_MAX_BODY_BYTES + 1)
+        if len(body) > MASTER_RESPONSE_MAX_BODY_BYTES:
+            raise MasterSyncError(
+                "Setuora Master response exceeded the 5 MiB safety limit."
+            )
         return int(status or 200), body
     finally:
         close = getattr(response, "close", None)

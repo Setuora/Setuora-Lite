@@ -90,7 +90,7 @@ def test_user_creation_accepts_multiple_roles():
         response = create_user(
             make_request(1, method="POST"),
             username="dual",
-            password="dual-pass",
+            password="dual-password",
             role=["purchase", "sales"],
             db=db,
         )
@@ -171,6 +171,7 @@ def test_super_admin_can_reset_another_users_password():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    staff_token = create_session_token(2)
     try:
         client = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"})
         cookies = {SESSION_COOKIE: create_session_token(1)}
@@ -184,6 +185,10 @@ def test_super_admin_can_reset_another_users_password():
                 "force_change": "true",
             },
         )
+        stale_session = client.get(
+            "/",
+            cookies={SESSION_COOKIE: staff_token},
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -193,6 +198,7 @@ def test_super_admin_can_reset_another_users_password():
         assert verify_password("new-staff-pass", staff.password_hash)
         assert not verify_password("old-staff-pass", staff.password_hash)
         assert staff.must_change_password is True
+        assert staff.session_version == 1
     engine.dispose()
 
     assert page.status_code == 200
@@ -201,6 +207,8 @@ def test_super_admin_can_reset_another_users_password():
     assert "old-staff-pass" not in page.text
     assert response.status_code == 303
     assert response.headers["location"] == "/users?success=password_reset"
+    assert stale_session.status_code == 303
+    assert stale_session.headers["location"] == "/login"
 
 
 def test_password_reset_is_super_admin_only_and_validates_input():

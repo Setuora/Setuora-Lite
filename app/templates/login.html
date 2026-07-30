@@ -23,10 +23,10 @@
       <div class="alert">{{ message }}</div>
       {% endif %}
       <form method="post" action="/login" class="stack">
-        <label>Username<input name="username" autocomplete="username" required autofocus></label>
+        <label>Username<input name="username" autocomplete="username" maxlength="80" required autofocus></label>
         <label>Password
           <span class="password-field" data-password-field>
-            <input name="password" type="password" autocomplete="current-password" required>
+            <input name="password" type="password" autocomplete="current-password" maxlength="1024" required>
             <button class="button small ghost" type="button" data-password-toggle aria-pressed="false">Show</button>
           </span>
         </label>

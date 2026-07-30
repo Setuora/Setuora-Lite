@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Role, User, has_any_role, normalize_role_values
-from app.security import read_session_token
+from app.security import read_session_claims
 from app.services.access_control import configured_role_has_access, get_role_access_config
 
 SESSION_COOKIE = "setuora_session"
@@ -14,13 +14,20 @@ def redirect_exception(url: str) -> HTTPException:
 
 
 def current_user(request: Request, db: Session) -> User | None:
-    user_id = read_session_token(request.cookies.get(SESSION_COOKIE))
-    if not user_id:
+    claims = read_session_claims(request.cookies.get(SESSION_COOKIE))
+    if not claims:
         return None
+    user_id, session_version = claims
     user = db.get(User, user_id)
-    if not user or not user.active or user.deleted_at:
+    if (
+        not user
+        or not user.active
+        or user.deleted_at
+        or int(user.session_version or 0) != session_version
+    ):
         return None
     request.state.session_user_id = user.id
+    request.state.session_version = int(user.session_version or 0)
     return user
 
 

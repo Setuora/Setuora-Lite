@@ -7,7 +7,12 @@ from app.auth import require_permission, require_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import Batch, InventoryTransaction, Role, ScanLog, Serial, StockRelocation, TallyMasterConfirmation, User, serialize_role_values, utc_now
-from app.security import MIN_PASSWORD_LENGTH, hash_password
+from app.security import (
+    MAX_PASSWORD_LENGTH,
+    MIN_PASSWORD_LENGTH,
+    hash_password,
+    password_policy_error,
+)
 from app.services.change_audit import record_change
 from app.services.settings import list_companies
 from app.services.tally_access import (
@@ -58,7 +63,9 @@ def users_page(request: Request, error: str = "", success: str = "", db: Session
         "user_delete_self": "You cannot delete your own account",
         "password_reset_self": "Use Change password in your account menu to update your own password.",
         "password_too_short": f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
+        "password_too_long": f"Password must be at most {MAX_PASSWORD_LENGTH} characters.",
         "password_mismatch": "Password and confirmation do not match.",
+        "username_invalid": "Username must contain 1 to 80 characters.",
         "user_not_found": "User account was not found.",
         "role_required": "Select at least one role.",
         "tally_access_super_admin": "Super admins always have access to all Tally data.",
@@ -89,10 +96,28 @@ def create_user(
     db: Session = Depends(get_db),
 ):
     user = require_permission(request, db, "users_manage")
+    normalized_username = username.strip().lower()
+    if not normalized_username or len(normalized_username) > 80:
+        return RedirectResponse("/users?error=username_invalid", status_code=303)
+    policy_error = password_policy_error(password)
+    if policy_error:
+        error_code = (
+            "password_too_short"
+            if len(password) < MIN_PASSWORD_LENGTH
+            else "password_too_long"
+        )
+        return RedirectResponse(f"/users?error={error_code}", status_code=303)
     role_value = serialize_role_values(role)
     if not role_value:
         return RedirectResponse("/users?error=role_required", status_code=303)
-    db.add(User(username=username.strip().lower(), password_hash=hash_password(password), role=role_value, active=True))
+    db.add(
+        User(
+            username=normalized_username,
+            password_hash=hash_password(password),
+            role=role_value,
+            active=True,
+        )
+    )
     try:
         db.commit()
     except Exception:
@@ -161,6 +186,7 @@ def toggle_user(request: Request, user_id: int, db: Session = Depends(get_db)):
     target = db.get(User, user_id)
     if target and target.id != current.id and not target.deleted_at:
         target.active = not target.active
+        target.session_version += 1
         db.commit()
     return RedirectResponse("/users", status_code=303)
 
@@ -180,13 +206,20 @@ def reset_user_password(
         return RedirectResponse("/users?error=user_not_found", status_code=303)
     if target.id == current.id:
         return RedirectResponse("/users?error=password_reset_self", status_code=303)
-    if len(new_password) < MIN_PASSWORD_LENGTH:
-        return RedirectResponse("/users?error=password_too_short", status_code=303)
+    policy_error = password_policy_error(new_password)
+    if policy_error:
+        error_code = (
+            "password_too_short"
+            if len(new_password) < MIN_PASSWORD_LENGTH
+            else "password_too_long"
+        )
+        return RedirectResponse(f"/users?error={error_code}", status_code=303)
     if new_password != confirm_password:
         return RedirectResponse("/users?error=password_mismatch", status_code=303)
 
     target.password_hash = hash_password(new_password)
     target.must_change_password = force_change == "true"
+    target.session_version += 1
     db.commit()
     return RedirectResponse("/users?success=password_reset", status_code=303)
 

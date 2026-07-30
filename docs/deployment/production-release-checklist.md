@@ -11,6 +11,8 @@ python deploy.py status
 ```
 
 - [ ] Reviewed release source/checksums are used.
+- [ ] Client installers were built with `scripts/build_client_packages.py`
+      from a clean, tagged checkout and their SHA-256 checksums were retained.
 - [ ] Docker starts automatically after host reboot.
 - [ ] Lite runs exactly one Uvicorn process.
 - [ ] `.env` is excluded from Git/build context and readable only by the

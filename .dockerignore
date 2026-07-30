@@ -20,7 +20,7 @@ node_modules
 dist
 tests
 docs
-installer
 scripts
-Setuora.exe
-deployment/windows
+client
+Linux — Setuora Lite.run
+Windows — Setuora Lite.cmd

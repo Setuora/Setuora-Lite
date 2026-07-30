@@ -112,6 +112,41 @@ def test_runtime_schema_adds_tally_user_to_cached_sales_vouchers(tmp_path):
     assert "tally_user" in columns
 
 
+def test_runtime_schema_adds_user_session_version(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-users.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE batches (id INTEGER PRIMARY KEY)"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY,
+                    username VARCHAR(80),
+                    password_hash VARCHAR(255),
+                    role VARCHAR(255),
+                    active BOOLEAN
+                )
+                """
+            )
+        )
+
+    ensure_runtime_schema(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("users")}
+    assert "session_version" in columns
+    with engine.connect() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users "
+                "(id, username, password_hash, role, active) "
+                "VALUES (1, 'admin', 'x', 'super_admin', 1)"
+            )
+        )
+        assert connection.scalar(
+            text("SELECT session_version FROM users WHERE id = 1")
+        ) == 0
+
+
 def test_inventory_table_rebuild_preserves_rows_and_adds_all_foreign_keys(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
 

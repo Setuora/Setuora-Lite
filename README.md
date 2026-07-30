@@ -66,6 +66,8 @@ Setuora-Lite/
 |-- Dockerfile                        Non-root Lite runtime image
 |-- deploy.py                         Linux/Windows deployment lifecycle
 |-- requirements-runtime.lock         Hash-verified container dependencies
+|-- client/                           Packaged Linux/Windows lifecycle launchers
+|-- scripts/build_client_packages.py  Single-file installer builder
 |-- app/                              FastAPI application
 |   |-- main.py                       App entrypoint and route registration
 |   |-- models.py                     SQLAlchemy database models
@@ -144,9 +146,26 @@ Install the public CA file exported by `setup`/`export-ca` on each approved
 staff phone or workstation before opening the printed LAN HTTPS URL. Keep the
 Caddy data volume private; only the exported public root is distributed.
 
-The old `Setuora.exe`, NSSM, and host-Caddy scripts are retained only as
-existing-installation migration references. They are not the supported setup
-path for a connected Lite node.
+### Shareable Linux and Windows Installers
+
+Build client-ready, self-contained installers from a reviewed release:
+
+```bash
+python scripts/build_client_packages.py --version 1.0.0
+```
+
+This creates a Linux `.run`, a double-clickable Windows `.cmd`, and SHA-256
+checksums in `dist/`. Each package installs or updates the complete Docker
+deployment without Git and excludes `.env`, credentials, databases, backups,
+exported certificates, and Docker volume state. See the
+[client package guide](docs/deployment/client-packages.md).
+
+The repository root shortcuts `Linux — Setuora Lite.run` and
+`Windows — Setuora Lite.cmd` launch the newest matching package in `dist/`.
+
+Like Setuora Master, the Windows package uses a PowerShell lifecycle launcher
+for the same `deploy.py` commands. It contains no executable installer and does
+not maintain a second deployment implementation.
 
 ### Existing Local Database
 
@@ -337,8 +356,7 @@ certificate.
 
 Compose applies `restart: unless-stopped` to Lite, Caddy, and Tailscale. Configure
 Docker Engine/Desktop to start at host boot. Lite/Caddy do not wait for
-Tailscale health, so an offline reboot still brings the local UI back. The old
-NSSM guide is retained only for migration reference.
+Tailscale health, so an offline reboot still brings the local UI back.
 
 ## 15. Useful Deployment Docs
 
@@ -347,6 +365,7 @@ NSSM guide is retained only for migration reference.
 - `../Setuora-Master/docs/api/node-sync-v1.md`
 - `../Setuora-Master/docs/architecture/adr-001-master-lite-control-plane.md`
 - `docs/deployment/installation-guide.md`
+- `docs/deployment/client-packages.md`
 - `docs/deployment/https-lan-guide.md`
 - `docs/deployment/user-manual.md`
 - `docs/deployment/backup-restore-guide.md`

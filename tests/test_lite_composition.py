@@ -6,7 +6,7 @@ from fastapi import HTTPException
 import pytest
 
 from app.main import create_app
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.routers import maintenance
 
 
@@ -125,3 +125,46 @@ def test_connected_lite_disables_destructive_browser_recovery(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert "cursor reconciliation" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "expected"),
+    [
+        ("FRANCHISE_CODE", "CHANGE-ME", "FRANCHISE_CODE"),
+        ("FRANCHISE_CODE", "INVALID CODE", "FRANCHISE_CODE"),
+        ("MASTER_URL", "https://master.example.com", "MASTER_URL"),
+        ("MASTER_URL", "https://master.example.ts.net/api", "MASTER_URL"),
+        ("MASTER_API_KEY", "not-a-node-credential", "MASTER_API_KEY"),
+        ("MASTER_TLS_VERIFY", "false", "MASTER_TLS_VERIFY"),
+    ],
+)
+def test_runtime_master_configuration_fails_closed(
+    monkeypatch,
+    name,
+    value,
+    expected,
+):
+    monkeypatch.setenv("MASTER_SYNC_ENABLED", "true")
+    monkeypatch.setenv("FRANCHISE_CODE", "SG-NORTH-01")
+    monkeypatch.setenv("MASTER_URL", "https://setuora-master.example.ts.net")
+    monkeypatch.setenv(
+        "MASTER_API_KEY",
+        f"setuora-node.node_id.{'k' * 40}",
+    )
+    monkeypatch.setenv("MASTER_TLS_VERIFY", "true")
+    monkeypatch.setenv(name, value)
+
+    assert expected in (Settings().master_sync_configuration_error or "")
+
+
+def test_runtime_master_configuration_accepts_exact_magicdns_endpoint(monkeypatch):
+    monkeypatch.setenv("MASTER_SYNC_ENABLED", "true")
+    monkeypatch.setenv("FRANCHISE_CODE", "SG-NORTH-01")
+    monkeypatch.setenv("MASTER_URL", "https://setuora-master.example.ts.net")
+    monkeypatch.setenv(
+        "MASTER_API_KEY",
+        f"setuora-node.node_id.{'k' * 40}",
+    )
+    monkeypatch.setenv("MASTER_TLS_VERIFY", "true")
+
+    assert Settings().master_sync_configuration_error is None

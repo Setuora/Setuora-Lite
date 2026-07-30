@@ -1,7 +1,9 @@
 import os
+import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 DEFAULT_SECRET_KEY = "dev-change-me"
@@ -16,6 +18,28 @@ INSECURE_BOOTSTRAP_PASSWORDS = {
     "change-this-password",
     "change-this-before-first-start",
 }
+FRANCHISE_CODE_PLACEHOLDERS = {
+    "",
+    "CHANGE-ME",
+    "CHANGEME",
+    "DEFAULT",
+    "FRANCHISE",
+    "FRANCHISE-CODE",
+    "LITE",
+    "MASTER",
+    "SETUORA",
+    "YOUR-FRANCHISE",
+    "YOUR-FRANCHISE-CODE",
+}
+FRANCHISE_CODE_PATTERN = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$")
+DNS_NAME_PATTERN = re.compile(
+    r"^(?=.{1,253}\.?$)"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$"
+)
+MASTER_API_KEY_PATTERN = re.compile(
+    r"^setuora-node\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{32,}$"
+)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SECRET_KEY_FILE = PROJECT_ROOT / "data" / "secret_key"
 BACKUP_RUNTIME_ENV_KEYS = {
@@ -99,6 +123,31 @@ def _resolve_secret_key() -> str:
         return env_value or DEFAULT_SECRET_KEY
 
 
+def _master_url_configuration_error(value: str) -> str | None:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return "MASTER_URL must be an exact https://*.ts.net URL."
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if (
+        parsed.scheme != "https"
+        or not hostname.endswith(".ts.net")
+        or hostname == "ts.net"
+        or "*" in hostname
+        or parsed.username
+        or parsed.password
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        return "MASTER_URL must be an exact https://*.ts.net URL without a path or port."
+    if DNS_NAME_PATTERN.fullmatch(hostname) is None:
+        return "MASTER_URL contains an invalid MagicDNS hostname."
+    return None
+
+
 class Settings:
     def __init__(self) -> None:
         self.app_mode: str = os.getenv("SETUORA_APP_MODE", "lite").strip().lower()
@@ -157,12 +206,17 @@ class Settings:
     def master_sync_configuration_error(self) -> str | None:
         if not self.master_sync_enabled:
             return None
-        if not self.franchise_code:
-            return "FRANCHISE_CODE is required when MASTER_SYNC_ENABLED=true."
-        if not self.master_url.startswith("https://"):
-            return "MASTER_URL must use https:// when MASTER_SYNC_ENABLED=true."
-        if not self.master_api_key:
-            return "MASTER_API_KEY is required when MASTER_SYNC_ENABLED=true."
+        if (
+            self.franchise_code in FRANCHISE_CODE_PLACEHOLDERS
+            or len(self.franchise_code) > 40
+            or FRANCHISE_CODE_PATTERN.fullmatch(self.franchise_code) is None
+        ):
+            return "FRANCHISE_CODE must be a permanent, unique code of at most 40 characters."
+        master_url_error = _master_url_configuration_error(self.master_url)
+        if master_url_error:
+            return master_url_error
+        if MASTER_API_KEY_PATTERN.fullmatch(self.master_api_key) is None:
+            return "MASTER_API_KEY must use the setuora-node.<id>.<secret> format."
         if not self.master_tls_verify:
             return "MASTER_TLS_VERIFY must remain true for Master synchronization."
         return None
