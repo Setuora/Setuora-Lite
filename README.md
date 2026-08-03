@@ -160,8 +160,11 @@ deployment without Git and excludes `.env`, credentials, databases, backups,
 exported certificates, and Docker volume state. See the
 [client package guide](docs/deployment/client-packages.md).
 
-The repository root shortcuts `Linux — Setuora Lite.run` and
-`Windows — Setuora Lite.cmd` launch the newest matching package in `dist/`.
+The repository root shortcut `Linux — Setuora Lite.run` launches the newest
+matching package in `dist/`. On a Windows source checkout,
+`Windows — Setuora Lite.cmd` builds the package when `dist/` is empty and then
+launches it. Distribute the generated `Setuora-Lite-<version>-windows.cmd`, not
+the repository shortcut.
 
 Like Setuora Master, the Windows package uses a PowerShell lifecycle launcher
 for the same `deploy.py` commands. It contains no executable installer and does

@@ -59,7 +59,8 @@ from app.services.shelf_verification import (
     shelf_verification_state,
     verify_pending_items_on_shelf,
 )
-from app.services.tally import TALLY_XML_SUPPORTED_BATCH_TYPES, TallySyncError, build_voucher_xml, sync_batch
+from app.services.sync_worker import queue_batch_for_sync
+from app.services.tally import TALLY_XML_SUPPORTED_BATCH_TYPES, TallySyncError, build_voucher_xml
 from app.services.tally_excel import (
     MAX_TALLY_EXCEL_UPLOAD_BYTES,
     TALLY_ACCOUNTING_REQUIRED_EXPORT_FIELDS,
@@ -116,7 +117,13 @@ INDIAN_STATE_OPTIONS = (
 GST_REGISTRATION_OPTIONS = tuple(
     (
         registration_type.value,
-        "Registered" if registration_type == GstRegistrationType.REGULAR else registration_type.value,
+        (
+            "Registered"
+            if registration_type == GstRegistrationType.REGULAR
+            else "Unregistered Consumer"
+            if registration_type == GstRegistrationType.UNREGISTERED_CONSUMER
+            else registration_type.value
+        ),
     )
     for registration_type in GstRegistrationType
 )
@@ -1138,7 +1145,7 @@ def submit_batch(request: Request, batch_id: int, db: Session = Depends(get_db))
         )
     db.commit()
     if not lite_mode:
-        sync_batch(db, batch)
+        queue_batch_for_sync(db, batch)
     return RedirectResponse(f"/batches/{batch.id}", status_code=303)
 
 
@@ -1154,7 +1161,7 @@ def retry_batch(request: Request, batch_id: int, db: Session = Depends(get_db)):
         return RedirectResponse("/batches", status_code=303)
     require_permission(request, db, "tally_sync_retry", {"edit", "yes"})
     if batch.status in {BatchStatus.PENDING_SYNC.value, BatchStatus.FAILED.value, BatchStatus.SUBMITTED.value}:
-        sync_batch(db, batch)
+        queue_batch_for_sync(db, batch)
     return RedirectResponse(f"/batches/{batch.id}", status_code=303)
 
 

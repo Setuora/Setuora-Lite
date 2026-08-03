@@ -14,10 +14,11 @@ from sqlalchemy.orm import Session
 
 from app.models import Batch, BatchStatus, BatchType, GstRegistrationType, SyncAttempt, utc_now
 from app.services.inventory import update_batch_transaction_references
+from app.services.report_format import batch_voucher_number
 from app.services.settings import (
     get_all_settings,
     gst_rate_key,
-    is_tally_enabled,
+    is_tally_sync_enabled_for_batch,
     parse_sales_gst_ledger_mappings,
 )
 from app.services.voucher import calculate_voucher_summary
@@ -155,6 +156,7 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
         raise TallySyncError(f"Tally XML is not configured for {batch.batch_type}", retryable=False)
     is_sale = batch_type == BatchType.SALE
     is_sales_side = batch_type in {BatchType.SALE, BatchType.SALES_RETURN}
+    voucher_view = "Invoice Voucher View" if is_sales_side else "Accounting Voucher View"
     voucher_type = _voucher_type(settings, batch_type)
     party_name = (batch.party_name or "").strip()
     if not party_name:
@@ -163,6 +165,7 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
             retryable=False,
         )
     sales_gst_mappings = parse_sales_gst_ledger_mappings(settings.get("sales_gst_ledger_mappings"))
+    stock_location = settings.get("tally_stock_location", "").strip() or "Main Location"
 
     def sales_ledgers(gst_rate: Decimal) -> dict[str, str]:
         key = gst_rate_key(gst_rate)
@@ -191,12 +194,12 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
             "REMOTEID": tally_remote_id(batch, settings),
             "VCHTYPE": voucher_type,
             "ACTION": "Create",
-            "OBJVIEW": "Accounting Voucher View",
+            "OBJVIEW": voucher_view,
         },
     )
     _text(voucher, "DATE", _voucher_date(batch))
     _text(voucher, "VOUCHERTYPENAME", voucher_type)
-    _text(voucher, "VOUCHERNUMBER", batch.batch_number)
+    _text(voucher, "VOUCHERNUMBER", batch_voucher_number(batch))
     _text(voucher, "PARTYLEDGERNAME", party_name)
     if is_sales_side:
         gst_registration_type = (
@@ -212,7 +215,8 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
         _text(voucher, "STATENAME", batch.party_state)
         _text(voucher, "PLACEOFSUPPLY", batch.party_state)
         _text(voucher, "COUNTRYOFRESIDENCE", "India")
-    _text(voucher, "PERSISTEDVIEW", "Accounting Voucher View")
+    _text(voucher, "PERSISTEDVIEW", voucher_view)
+    _text(voucher, "ISINVOICE", "Yes" if is_sales_side else "No")
     _text(voucher, "NARRATION", f"Setuora barcode batch {batch.batch_number}")
 
     summary = calculate_voucher_summary(batch)
@@ -224,11 +228,37 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
     # Tally uses negative amounts for debits and positive amounts for credits.
     income_is_credit = is_sale
 
-    def add_ledger(parent: ET.Element, tag: str, name: str, amount: Decimal, credit: bool) -> None:
+    def add_ledger(
+        parent: ET.Element,
+        tag: str,
+        name: str,
+        amount: Decimal,
+        credit: bool,
+        *,
+        is_party: bool = False,
+    ) -> None:
         entry = ET.SubElement(parent, tag)
         _text(entry, "LEDGERNAME", name)
         _text(entry, "ISDEEMEDPOSITIVE", "No" if credit else "Yes")
+        if is_party:
+            _text(entry, "ISPARTYLEDGER", "Yes")
+            _text(entry, "ISLASTDEEMEDPOSITIVE", "No" if credit else "Yes")
         _text(entry, "AMOUNT", _money(amount if credit else -amount))
+
+    def add_signed_ledger(name: str, signed_amount: Decimal, *, is_party: bool = False) -> None:
+        add_ledger(
+            voucher,
+            "LEDGERENTRIES.LIST",
+            name,
+            abs(signed_amount),
+            credit=signed_amount >= 0,
+            is_party=is_party,
+        )
+
+    # Keep posting order aligned with the Tally workbook export: party first,
+    # followed by item rows, GST ledgers, and round-off.
+    party_signed_amount = -summary.final_value if is_sale else summary.final_value
+    add_signed_ledger(party_name, party_signed_amount, is_party=True)
 
     for line in summary.lines:
         inventory = ET.SubElement(voucher, "ALLINVENTORYENTRIES.LIST")
@@ -241,6 +271,13 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
         _text(inventory, "AMOUNT", _money(signed_line))
         _text(inventory, "ACTUALQTY", f"{line.quantity} {line.unit}")
         _text(inventory, "BILLEDQTY", f"{line.quantity} {line.unit}")
+        batch_allocation = ET.SubElement(inventory, "BATCHALLOCATIONS.LIST")
+        _text(batch_allocation, "GODOWNNAME", stock_location)
+        _text(batch_allocation, "BATCHNAME", "Primary Batch")
+        _text(batch_allocation, "DESTINATIONGODOWNNAME", stock_location)
+        _text(batch_allocation, "AMOUNT", _money(signed_line))
+        _text(batch_allocation, "ACTUALQTY", f"{line.quantity} {line.unit}")
+        _text(batch_allocation, "BILLEDQTY", f"{line.quantity} {line.unit}")
         allocations = ET.SubElement(inventory, "ACCOUNTINGALLOCATIONS.LIST")
         line_income_ledger = (
             sales_ledgers(line.gst_rate)["sales"] if is_sales_side else purchase_ledgers["purchase"]
@@ -291,15 +328,11 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
                 credit=False,
             )
     if summary.round_off != 0:
-        add_ledger(
-            voucher,
-            "LEDGERENTRIES.LIST",
+        round_off_signed_amount = summary.round_off if is_sale else -summary.round_off
+        add_signed_ledger(
             _required_value(settings, "round_off_ledger_name", "round off ledger"),
-            summary.round_off,
-            credit=income_is_credit,
+            round_off_signed_amount,
         )
-
-    add_ledger(voucher, "LEDGERENTRIES.LIST", party_name, summary.final_value, credit=not is_sale)
 
     return ET.tostring(envelope, encoding="unicode")
 
@@ -312,8 +345,9 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
     url = f"http://{host}:{port}"
     request = Request(url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST")
     try:
-        with urlopen(request, timeout=5) as response:
-            response_xml = response.read().decode("utf-8", errors="replace")
+        with TALLY_REQUEST_LOCK:
+            with urlopen(request, timeout=5) as response:
+                response_xml = response.read().decode("utf-8", errors="replace")
     except (URLError, OSError) as exc:
         raise TallySyncError("Tally connection failed", retryable=True, request_xml=xml) from exc
 
@@ -346,8 +380,10 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
     return TallyResult(request_xml=xml, response_xml=response_xml, reference=reference)
 
 
-# Prevent request/retry races from posting the same voucher twice.
-_SYNC_LOCK = threading.Lock()
+# Serialize voucher, gateway-check, and read-only discovery traffic. Tally's
+# local HTTP server is easily overloaded by overlapping requests.
+TALLY_REQUEST_LOCK = threading.RLock()
+_SYNC_LOCK = TALLY_REQUEST_LOCK
 
 
 def sync_batch(db: Session, batch: Batch) -> None:
@@ -395,17 +431,27 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
         return
     batch.sync_remote_id = tally_remote_id(batch, settings)
     try:
-        xml = batch.sync_request_xml or build_voucher_xml(batch, settings)
+        # A confirmed Tally rejection is safe to rebuild after the user fixes
+        # masters/settings or Setuora's XML format changes. Pending and stale
+        # SYNCING attempts keep their frozen payload because Tally may already
+        # have accepted the request before the connection/process was lost.
+        xml = (
+            build_voucher_xml(batch, settings)
+            if batch.status == BatchStatus.FAILED.value
+            else batch.sync_request_xml or build_voucher_xml(batch, settings)
+        )
     except TallySyncError as exc:
         batch.status = BatchStatus.PENDING_SYNC.value
         batch.last_error = str(exc)
+        batch.last_retry_at = now
         db.add(SyncAttempt(batch_id=batch.id, status=BatchStatus.PENDING_SYNC.value, error=batch.last_error))
         db.commit()
         return
-    if not is_tally_enabled(db):
+    if not is_tally_sync_enabled_for_batch(db, batch.batch_type):
         batch.status = BatchStatus.PENDING_SYNC.value
         batch.sync_request_xml = xml
         batch.last_error = "Tally sync is disabled in settings"
+        batch.last_retry_at = now
         db.add(SyncAttempt(batch_id=batch.id, status=BatchStatus.PENDING_SYNC.value, request_xml=xml, error=batch.last_error))
         db.commit()
         return
@@ -447,6 +493,7 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
     except TallySyncError as exc:
         batch.status = BatchStatus.PENDING_SYNC.value if exc.retryable else BatchStatus.FAILED.value
         batch.last_error = str(exc)
+        batch.last_retry_at = now
         batch.sync_started_at = None
         attempt.status = batch.status
         attempt.request_xml = exc.request_xml or xml

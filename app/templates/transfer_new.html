@@ -13,14 +13,14 @@
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
 <section class="panel form-panel">
-  <form method="post" action="/transfers" class="grid-form">
+  <form method="post" action="/transfers" class="grid-form transfer-create-form">
     <label>Destination franchise code
       <input name="peer_code" value="{{ peer_code }}" maxlength="80" autocomplete="off" placeholder="For example BLR-02" required autofocus>
     </label>
     <label>Notes
-      <textarea name="notes" rows="3" maxlength="1000" placeholder="Dispatch note, vehicle, or internal reference">{{ notes }}</textarea>
+      <textarea name="notes" rows="1" maxlength="1000" placeholder="Dispatch note, vehicle, or internal reference">{{ notes }}</textarea>
     </label>
-    <div class="actions">
+    <div class="actions transfer-create-form__actions">
       <button class="button primary" type="submit">Create manifest</button>
       <a class="button" href="/transfers">Cancel</a>
     </div>

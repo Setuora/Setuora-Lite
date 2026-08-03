@@ -1,4 +1,5 @@
 from datetime import date
+from urllib.error import URLError
 from unittest.mock import patch
 
 from app.models import Product, User
@@ -6,14 +7,17 @@ from app.services.tally_masters import (
     build_company_list_xml,
     build_ledger_list_xml,
     build_sales_book_xml,
+    build_stock_location_list_xml,
     collect_master_requirements,
     confirm_master,
     confirmation_lookup,
     fetch_tally_companies,
     fetch_tally_ledgers,
     fetch_tally_sales_book,
+    fetch_tally_stock_locations,
     live_sync_readiness,
     readiness_counts,
+    TALLY_GATEWAY_TEST_TIMEOUT_SECONDS,
     test_tally_gateway as check_tally_gateway,
 )
 from app.services.settings import update_settings
@@ -84,9 +88,10 @@ def test_removed_legacy_fields_do_not_create_missing_requirements(db_session):
     requirements = collect_master_requirements(db_session)
 
     assert all(item.master_name for item in requirements)
-    assert {item.master_type for item in requirements} == {"Company", "Ledger"}
+    assert {item.master_type for item in requirements} == {"Company", "Godown", "Ledger"}
     assert {(item.master_type, item.master_name) for item in requirements} == {
         ("Company", VALID_SETTINGS["company_name"]),
+        ("Godown", "Main Location"),
         ("Ledger", VALID_SETTINGS["round_off_ledger_name"]),
     }
 
@@ -116,6 +121,7 @@ def test_company_list_xml_is_read_only_export_request():
 
 def test_ledger_and_sales_book_xml_are_scoped_to_selected_company():
     ledger_xml = build_ledger_list_xml("Selected Company")
+    location_xml = build_stock_location_list_xml("Selected Company")
     sales_xml = build_sales_book_xml(
         "Selected Company",
         date(2026, 4, 1),
@@ -125,6 +131,9 @@ def test_ledger_and_sales_book_xml_are_scoped_to_selected_company():
     assert "<ID>Setuora Ledger List</ID>" in ledger_xml
     assert "<SVCURRENTCOMPANY>Selected Company</SVCURRENTCOMPANY>" in ledger_xml
     assert "<NATIVEMETHOD>ClosingBalance</NATIVEMETHOD>" in ledger_xml
+    assert "<ID>Setuora Stock Location List</ID>" in location_xml
+    assert "<SVCURRENTCOMPANY>Selected Company</SVCURRENTCOMPANY>" in location_xml
+    assert "<TYPE>Godown</TYPE>" in location_xml
     assert "<ID>Setuora Sales Book</ID>" in sales_xml
     assert '<SVFROMDATE TYPE="Date">20260401</SVFROMDATE>' in sales_xml
     assert '<SVTODATE TYPE="Date">20260715</SVTODATE>' in sales_xml
@@ -169,6 +178,14 @@ def test_live_tally_data_parses_companies_ledgers_and_sales_vouchers():
         _GatewayResponse(
             """
             <ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>
+              <GODOWN NAME="Franchise Mysuru"><NAME>Franchise Mysuru</NAME><PARENT>Main Location</PARENT></GODOWN>
+              <GODOWN><NAME>Main Location</NAME></GODOWN>
+            </COLLECTION></DATA></BODY></ENVELOPE>
+            """
+        ),
+        _GatewayResponse(
+            """
+            <ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>
               <VOUCHER>
                 <DATE>20260715</DATE><VOUCHERNUMBER>42</VOUCHERNUMBER>
                 <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME><PARTYLEDGERNAME>Customer A</PARTYLEDGERNAME>
@@ -184,6 +201,7 @@ def test_live_tally_data_parses_companies_ledgers_and_sales_vouchers():
     with patch("app.services.tally_masters.urlopen", side_effect=responses):
         companies = fetch_tally_companies(settings)
         ledgers = fetch_tally_ledgers(settings, "First Company")
+        locations = fetch_tally_stock_locations(settings, "First Company")
         vouchers = fetch_tally_sales_book(
             settings,
             "First Company",
@@ -194,6 +212,8 @@ def test_live_tally_data_parses_companies_ledgers_and_sales_vouchers():
     assert companies == ["First Company", "Second Company"]
     assert [ledger.name for ledger in ledgers] == ["Customer A", "Sales @ 5%"]
     assert ledgers[0].parent == "Sundry Debtors"
+    assert [location.name for location in locations] == ["Franchise Mysuru", "Main Location"]
+    assert locations[0].parent == "Main Location"
     assert vouchers[0].date == "2026-07-15"
     assert vouchers[0].voucher_number == "42"
     assert vouchers[0].party_ledger == "Customer A"
@@ -245,11 +265,23 @@ def test_gateway_check_accepts_successful_tally_xml():
           <BODY><DATA><COLLECTION><COMPANY><NAME>Setuora Test Company</NAME></COMPANY></COLLECTION></DATA></BODY>
         </ENVELOPE>
     """
-    with patch("app.services.tally_masters.urlopen", return_value=_GatewayResponse(response)):
+    with patch("app.services.tally_masters.urlopen", return_value=_GatewayResponse(response)) as request:
         result = check_tally_gateway({"tally_host": "127.0.0.1", "tally_port": "9000"})
 
     assert result.ok
     assert result.message == "Tally gateway responded"
+    assert request.call_args.kwargs["timeout"] == TALLY_GATEWAY_TEST_TIMEOUT_SECONDS == 15
+
+
+def test_gateway_check_reports_wrapped_timeouts_consistently():
+    with patch(
+        "app.services.tally_masters.urlopen",
+        side_effect=URLError(TimeoutError("timed out")),
+    ):
+        result = check_tally_gateway({"tally_host": "127.0.0.1", "tally_port": "9000"})
+
+    assert not result.ok
+    assert result.message == "Tally gateway timed out after 15 seconds"
 
 
 def test_live_sync_readiness_requires_all_confirmations(db_session):

@@ -1348,15 +1348,15 @@ def test_permanent_franchise_code_change_blocks_enqueue_and_transport(
     assert db_session.scalar(select(func.count(MasterOutboxEvent.id))) == 2
 
 
-def test_submit_route_uses_direct_tally_only_in_legacy_mode(
+def test_submit_route_queues_direct_tally_only_in_legacy_mode(
     db_session,
     monkeypatch,
 ):
-    sync_calls: list[str] = []
+    queue_calls: list[str] = []
     monkeypatch.setattr(
         batches_router,
-        "sync_batch",
-        lambda _db, batch: sync_calls.append(batch.batch_number),
+        "queue_batch_for_sync",
+        lambda _db, batch: queue_calls.append(batch.batch_number),
     )
 
     legacy_user, _product, _serial, legacy_batch = _sale_batch(
@@ -1369,7 +1369,7 @@ def test_submit_route_uses_direct_tally_only_in_legacy_mode(
         db_session,
     )
     assert response.status_code == 303
-    assert sync_calls == [legacy_batch.batch_number]
+    assert queue_calls == [legacy_batch.batch_number]
 
     lite_settings = _settings(app_mode="lite")
     monkeypatch.setattr(master_sync, "get_settings", lambda: lite_settings)
@@ -1389,7 +1389,7 @@ def test_submit_route_uses_direct_tally_only_in_legacy_mode(
     )
 
     assert response.status_code == 303
-    assert sync_calls == [legacy_batch.batch_number]
+    assert queue_calls == [legacy_batch.batch_number]
     db_session.refresh(lite_batch)
     assert lite_batch.status == BatchStatus.PENDING_SYNC.value
     event = db_session.scalar(

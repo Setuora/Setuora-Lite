@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_permission
 from app.database import get_db
-from app.models import Company
+from app.models import Company, TallyDataJob
 from app.services.access_control import role_has_access
 from app.services.change_audit import record_change
 from app.services.settings import (
@@ -28,20 +28,28 @@ from app.services.tally_cache import (
     cached_ledgers,
     cached_sales_book,
     latest_cache_refresh,
-    replace_cached_ledgers,
-    replace_cached_sales_book,
+)
+from app.services.sync_worker import (
+    gateway_check_state,
+    notify_retry_worker,
+    queue_tally_gateway_check,
+)
+from app.services.tally_jobs import (
+    COMPANIES_JOB,
+    decode_job_payload,
+    decode_job_result,
+    LEDGERS_JOB,
+    queue_tally_data_job,
+    SALES_BOOK_JOB,
+    STOCK_LOCATIONS_JOB,
+    TallyDataQueueFull,
 )
 from app.services.tally_masters import (
     collect_master_requirements,
     confirmation_lookup,
     confirm_master,
-    fetch_tally_companies,
-    fetch_tally_ledgers,
-    fetch_tally_sales_book,
     readiness_counts,
     remove_confirmation,
-    TallyDataError,
-    test_tally_gateway,
 )
 from app.templates import templates
 
@@ -66,6 +74,8 @@ def render_check_page(
     open_company_id: int | None = None,
 ):
     user = require_permission(request, db, "tally_check_edit")
+    if result is None:
+        result = gateway_check_state(db)
     requirements = collect_master_requirements(db)
     confirmations = confirmation_lookup(db)
     companies = scoped_companies(db, user)
@@ -122,6 +132,43 @@ def _live_error(message: str, status_code: int = 502) -> JSONResponse:
     return JSONResponse({"ok": False, "error": message}, status_code=status_code)
 
 
+def _queue_live_data_job(
+    db: Session,
+    *,
+    user,
+    company: Company,
+    config: dict[str, str],
+    job_type: str,
+    tally_company: str = "",
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> JSONResponse:
+    try:
+        job = queue_tally_data_job(
+            db,
+            job_type=job_type,
+            company_id=company.id,
+            requested_by_id=user.id,
+            settings=config,
+            tally_company=tally_company,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    except TallyDataQueueFull as exc:
+        return _live_error(str(exc), 429)
+    notify_retry_worker()
+    return JSONResponse(
+        {
+            "ok": True,
+            "queued": True,
+            "pending": True,
+            "job_id": job.id,
+            "status_url": f"/tally-check/jobs/{job.id}",
+        },
+        status_code=202,
+    )
+
+
 @router.get("")
 def tally_check_page(
     request: Request,
@@ -139,6 +186,7 @@ def save_company(
     company_name: str = Form(...),
     tally_host: str = Form(...),
     tally_port: str = Form(...),
+    tally_stock_location: str | None = Form(None),
     sales_voucher_type: str | None = Form(None),
     purchase_voucher_type: str | None = Form(None),
     sales_ledger_name: str | None = Form(None),
@@ -162,6 +210,11 @@ def save_company(
         "company_name": company_name,
         "tally_host": tally_host,
         "tally_port": tally_port,
+        "tally_stock_location": (
+            current_config.get("tally_stock_location", "Main Location")
+            if tally_stock_location is None
+            else tally_stock_location.strip() or "Main Location"
+        ),
         "sales_voucher_type": current_config.get("sales_voucher_type", "") if sales_voucher_type is None else sales_voucher_type,
         "purchase_voucher_type": current_config.get("purchase_voucher_type", "") if purchase_voucher_type is None else purchase_voucher_type,
         "sales_ledger_name": current_config.get("sales_ledger_name", "") if sales_ledger_name is None else sales_ledger_name,
@@ -234,7 +287,7 @@ def unconfirm(
 @router.post("/test-gateway")
 def test_gateway(request: Request, db: Session = Depends(get_db)):
     require_permission(request, db, "tally_check_edit")
-    result = test_tally_gateway(get_all_settings(db))
+    result = queue_tally_gateway_check(db)
     active = get_active_company(db)
     return render_check_page(
         request,
@@ -242,6 +295,116 @@ def test_gateway(request: Request, db: Session = Depends(get_db)):
         result,
         open_company_id=active.id if active else None,
     )
+
+
+@router.get("/test-gateway/status")
+def test_gateway_status(request: Request, db: Session = Depends(get_db)):
+    require_permission(request, db, "tally_check_edit")
+    result = gateway_check_state(db)
+    if result is None:
+        return JSONResponse({"ok": True, "status": "idle", "pending": False})
+    return JSONResponse(
+        {
+            "ok": True,
+            "request_id": result.request_id,
+            "status": result.status,
+            "pending": result.pending,
+            "gateway_ok": result.ok,
+            "message": result.message,
+            "response_excerpt": result.response_excerpt,
+        }
+    )
+
+
+@router.get("/jobs/{job_id}")
+def tally_data_job_status(
+    request: Request,
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    user = require_permission(request, db, "tally_check_edit")
+    job = db.get(TallyDataJob, job_id)
+    if job is None or not can_access_company(db, user, job.company_id):
+        return _live_error("Tally data request not found or not assigned to your account.", 404)
+    company = db.get(Company, job.company_id)
+    if company is None:
+        return _live_error("Company profile no longer exists.", 404)
+    payload = decode_job_payload(job)
+    tally_company = str(payload.get("tally_company", "")).strip()
+    if tally_company and not can_access_tally_company(db, user, company, tally_company):
+        return _live_error("This Tally company is not assigned to your account.", 403)
+    if job.status in {"queued", "running"}:
+        return JSONResponse(
+            {
+                "ok": True,
+                "job_id": job.id,
+                "status": job.status,
+                "pending": True,
+            }
+        )
+    if job.status == "failed":
+        return _live_error(job.error or "Tally data request failed")
+    if job.status != "succeeded":
+        return _live_error("Tally data request has an unknown status.", 500)
+
+    result = decode_job_result(job)
+    if job.job_type == COMPANIES_JOB:
+        names = result.get("companies", [])
+        available_names = [str(name) for name in names] if isinstance(names, list) else []
+        visible_names = filter_tally_company_names(db, user, company, available_names)
+        return JSONResponse(
+            {
+                "ok": True,
+                "pending": False,
+                "profile": {"id": company.id, "name": company.name},
+                "selected_company": company_config(company).get("company_name", ""),
+                "companies": visible_names,
+            }
+        )
+    if job.job_type == LEDGERS_JOB:
+        ledgers = cached_ledgers(db, company.id, tally_company)
+        visible_ledgers = filter_ledgers(db, user, company.id, ledgers)
+        return JSONResponse(
+            {
+                "ok": True,
+                "pending": False,
+                "company": tally_company,
+                "count": len(visible_ledgers),
+                "ledgers": [asdict(ledger) for ledger in visible_ledgers],
+            }
+        )
+    if job.job_type == STOCK_LOCATIONS_JOB:
+        locations = result.get("locations", [])
+        visible_locations = locations if isinstance(locations, list) else []
+        return JSONResponse(
+            {
+                "ok": True,
+                "pending": False,
+                "company": tally_company,
+                "count": len(visible_locations),
+                "locations": visible_locations,
+            }
+        )
+    if job.job_type == SALES_BOOK_JOB:
+        try:
+            from_date = date.fromisoformat(str(payload.get("from_date", "")))
+            to_date = date.fromisoformat(str(payload.get("to_date", "")))
+        except ValueError:
+            return _live_error("Queued sales book dates are invalid.", 500)
+        vouchers = cached_sales_book(db, company.id, tally_company, from_date, to_date)
+        visible_vouchers = filter_sales_vouchers(db, user, company.id, vouchers)
+        return JSONResponse(
+            {
+                "ok": True,
+                "pending": False,
+                "company": tally_company,
+                "from_date": from_date.isoformat(),
+                "to_date": to_date.isoformat(),
+                "count": len(visible_vouchers),
+                "vouchers": [asdict(voucher) for voucher in visible_vouchers],
+            }
+        )
+    return _live_error("Unsupported Tally data request.", 500)
 
 
 @router.get("/companies/{company_id}/live/companies")
@@ -254,18 +417,12 @@ def live_companies(
     company, config = _scoped_live_company_config(db, user, company_id)
     if not company or config is None:
         return _live_error("Company profile not found or not assigned to your account.", 404)
-    try:
-        names = fetch_tally_companies(config)
-    except TallyDataError as exc:
-        return _live_error(str(exc))
-    names = filter_tally_company_names(db, user, company, names)
-    return JSONResponse(
-        {
-            "ok": True,
-            "profile": {"id": company.id, "name": company.name},
-            "selected_company": config.get("company_name", ""),
-            "companies": names,
-        }
+    return _queue_live_data_job(
+        db,
+        user=user,
+        company=company,
+        config=config,
+        job_type=COMPANIES_JOB,
     )
 
 
@@ -282,19 +439,36 @@ def live_ledgers(
         return _live_error("Company profile not found or not assigned to your account.", 404)
     if not can_access_tally_company(db, user, company, tally_company):
         return _live_error("This Tally company is not assigned to your account.", 403)
-    try:
-        ledgers = fetch_tally_ledgers(config, tally_company)
-    except TallyDataError as exc:
-        return _live_error(str(exc))
-    replace_cached_ledgers(db, company.id, tally_company, ledgers)
-    visible_ledgers = filter_ledgers(db, user, company.id, ledgers)
-    return JSONResponse(
-        {
-            "ok": True,
-            "company": tally_company.strip(),
-            "count": len(visible_ledgers),
-            "ledgers": [asdict(ledger) for ledger in visible_ledgers],
-        }
+    return _queue_live_data_job(
+        db,
+        user=user,
+        company=company,
+        config=config,
+        job_type=LEDGERS_JOB,
+        tally_company=tally_company,
+    )
+
+
+@router.get("/companies/{company_id}/live/stock-locations")
+def live_stock_locations(
+    request: Request,
+    company_id: int,
+    tally_company: str,
+    db: Session = Depends(get_db),
+):
+    user = require_permission(request, db, "tally_check_edit")
+    company, config = _scoped_live_company_config(db, user, company_id)
+    if not company or config is None:
+        return _live_error("Company profile not found or not assigned to your account.", 404)
+    if not can_access_tally_company(db, user, company, tally_company):
+        return _live_error("This Tally company is not assigned to your account.", 403)
+    return _queue_live_data_job(
+        db,
+        user=user,
+        company=company,
+        config=config,
+        job_type=STOCK_LOCATIONS_JOB,
+        tally_company=tally_company,
     )
 
 
@@ -317,28 +491,15 @@ def live_sales_book(
         return _live_error("Sales book start date must be on or before the end date.", 400)
     if (to_date - from_date).days > 370:
         return _live_error("Choose a sales book period of 370 days or less.", 400)
-    try:
-        vouchers = fetch_tally_sales_book(config, tally_company, from_date, to_date)
-    except TallyDataError as exc:
-        return _live_error(str(exc))
-    replace_cached_sales_book(
+    return _queue_live_data_job(
         db,
-        company.id,
-        tally_company,
-        from_date,
-        to_date,
-        vouchers,
-    )
-    visible_vouchers = filter_sales_vouchers(db, user, company.id, vouchers)
-    return JSONResponse(
-        {
-            "ok": True,
-            "company": tally_company.strip(),
-            "from_date": from_date.isoformat(),
-            "to_date": to_date.isoformat(),
-            "count": len(visible_vouchers),
-            "vouchers": [asdict(voucher) for voucher in visible_vouchers],
-        }
+        user=user,
+        company=company,
+        config=config,
+        job_type=SALES_BOOK_JOB,
+        tally_company=tally_company,
+        from_date=from_date,
+        to_date=to_date,
     )
 
 

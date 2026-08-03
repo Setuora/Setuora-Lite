@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import Product, TallyMasterConfirmation, User, utc_now
 from app.services.settings import get_all_settings, parse_sales_gst_ledger_mappings
+from app.services.tally import TALLY_REQUEST_LOCK
 
 
 @dataclass(frozen=True)
@@ -38,11 +39,20 @@ class TallyDataError(RuntimeError):
     """Raised when read-only data discovery from Tally cannot be completed."""
 
 
+TALLY_GATEWAY_TEST_TIMEOUT_SECONDS = 15
+
+
 @dataclass(frozen=True)
 class TallyLedger:
     name: str
     parent: str = ""
     closing_balance: str = ""
+
+
+@dataclass(frozen=True)
+class TallyStockLocation:
+    name: str
+    parent: str = ""
 
 
 @dataclass(frozen=True)
@@ -82,6 +92,13 @@ def collect_master_requirements(db: Session) -> list[MasterRequirement]:
     requirements: dict[tuple[str, str], MasterRequirement] = {}
 
     _add(requirements, "Company", settings["company_name"], "Settings", "Must be the open Tally company")
+    _add(
+        requirements,
+        "Godown",
+        settings["tally_stock_location"],
+        "Settings",
+        "Company stock location / franchise",
+    )
     _add(requirements, "Ledger", settings["round_off_ledger_name"], "Settings", "Round off posting ledger")
     mappings = parse_sales_gst_ledger_mappings(settings.get("sales_gst_ledger_mappings"))
     for gst_rate, ledgers in mappings.items():
@@ -223,6 +240,16 @@ def build_ledger_list_xml(company_name: str) -> str:
     return ET.tostring(envelope, encoding="unicode")
 
 
+def build_stock_location_list_xml(company_name: str) -> str:
+    envelope, _ = _build_collection_export(
+        "Setuora Stock Location List",
+        "Godown",
+        ("Name", "Parent"),
+        company_name=company_name.strip(),
+    )
+    return ET.tostring(envelope, encoding="unicode")
+
+
 def build_sales_book_xml(company_name: str, from_date: date, to_date: date) -> str:
     envelope, tdl_message = _build_collection_export(
         "Setuora Sales Book",
@@ -325,8 +352,9 @@ def _post_read_request(settings: dict[str, str], xml: str) -> tuple[str, ET.Elem
     url = f"http://{host}:{port}"
     request = Request(url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST")
     try:
-        with urlopen(request, timeout=8) as response:
-            body = response.read().decode("utf-8", errors="replace")
+        with TALLY_REQUEST_LOCK:
+            with urlopen(request, timeout=8) as response:
+                body = response.read().decode("utf-8", errors="replace")
     except URLError as exc:
         reason = getattr(exc, "reason", exc)
         raise TallyDataError(f"Tally gateway did not respond: {reason}") from exc
@@ -386,6 +414,37 @@ def fetch_tally_ledgers(settings: dict[str, str], company_name: str) -> list[Tal
         )
         seen.add(name.casefold())
     return sorted(ledgers, key=lambda ledger: ledger.name.casefold())
+
+
+def fetch_tally_stock_locations(
+    settings: dict[str, str],
+    company_name: str,
+) -> list[TallyStockLocation]:
+    clean_company = company_name.strip()
+    if not clean_company:
+        raise TallyDataError("Choose a Tally company before loading stock locations.")
+    _, root = _post_read_request(
+        settings,
+        build_stock_location_list_xml(clean_company),
+    )
+    locations: list[TallyStockLocation] = []
+    seen: set[str] = set()
+    for node in root.iter():
+        if _local_tag(node) not in {"GODOWN", "LOCATION"}:
+            continue
+        name = _direct_text(node, "NAME") or (node.attrib.get("NAME") or "").strip()
+        if not name or name.casefold() in seen:
+            continue
+        locations.append(
+            TallyStockLocation(
+                name=name,
+                parent=_direct_text(node, "PARENT"),
+            )
+        )
+        seen.add(name.casefold())
+    if "main location" not in seen:
+        locations.append(TallyStockLocation("Main Location"))
+    return sorted(locations, key=lambda location: location.name.casefold())
 
 
 def _party_ledger(voucher: ET.Element) -> str:
@@ -461,16 +520,29 @@ def fetch_tally_sales_book(
 
 
 def test_tally_gateway(settings: dict[str, str]) -> GatewayCheckResult:
+    host = settings.get("tally_host", "").strip()
+    port = settings.get("tally_port", "").strip()
+    if not host or not port:
+        return GatewayCheckResult(False, "Tally host and port are not configured")
     xml = build_company_list_xml()
-    url = f"http://{settings['tally_host']}:{settings['tally_port']}"
+    url = f"http://{host}:{port}"
     request = Request(url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST")
     try:
-        with urlopen(request, timeout=5) as response:
-            body = response.read().decode("utf-8", errors="replace")
+        with TALLY_REQUEST_LOCK:
+            with urlopen(request, timeout=TALLY_GATEWAY_TEST_TIMEOUT_SECONDS) as response:
+                body = response.read().decode("utf-8", errors="replace")
     except URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            return GatewayCheckResult(
+                False,
+                f"Tally gateway timed out after {TALLY_GATEWAY_TEST_TIMEOUT_SECONDS} seconds",
+            )
         return GatewayCheckResult(False, f"Tally gateway did not respond: {exc.reason}")
     except TimeoutError:
-        return GatewayCheckResult(False, "Tally gateway timed out")
+        return GatewayCheckResult(
+            False,
+            f"Tally gateway timed out after {TALLY_GATEWAY_TEST_TIMEOUT_SECONDS} seconds",
+        )
     excerpt = " ".join(body.split())[:500]
     if not body.strip():
         return GatewayCheckResult(False, "Tally gateway returned an empty response")

@@ -197,4 +197,7 @@ def test_root_shortcuts_launch_the_newest_platform_installer():
     assert 'exec "$LATEST_INSTALLER"' in linux
     assert "Setuora-Lite-*-windows.cmd" in windows
     assert "/o:-d" in windows
+    assert "scripts\\build_client_packages.py" in windows
+    assert "No built Windows package was found. Building version" in windows
+    assert "Do not copy \"Windows — Setuora Lite.cmd\" by itself." in windows
     assert 'call "%SETUORA_INSTALLER%"' in windows

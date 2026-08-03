@@ -25,8 +25,11 @@ The installers and `Setuora-Lite-<version>-SHA256SUMS.txt` are written to
 delivery, and retain the exact package used at each franchise for rollback.
 
 The repository root also contains `Linux — Setuora Lite.run` and
-`Windows — Setuora Lite.cmd`. These local shortcuts launch the newest matching
-package in `dist/`.
+`Windows — Setuora Lite.cmd`. The Linux shortcut launches the newest matching
+package in `dist/`. On a Windows source checkout, the Windows shortcut builds a
+package first when `dist/` is empty, then launches it. These repository
+shortcuts are not distributable installers; give clients the generated
+`Setuora-Lite-<version>-windows.cmd` file instead.
 
 ## Client prerequisites
 
