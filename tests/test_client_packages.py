@@ -234,5 +234,8 @@ def test_root_shortcuts_launch_the_newest_platform_installer():
     assert "/o:-d" in windows
     assert "scripts\\build_client_packages.py" in windows
     assert "No built Windows package was found. Building version" in windows
+    assert "Installing it automatically with Windows Package Manager" in windows
+    assert "winget install --id Python.Python.3.11" in windows
+    assert "%LOCALAPPDATA%\\Programs\\Python\\Python311\\python.exe" in windows
     assert "Do not copy \"Windows — Setuora Lite.cmd\" by itself." in windows
     assert 'call "%SETUORA_INSTALLER%"' in windows

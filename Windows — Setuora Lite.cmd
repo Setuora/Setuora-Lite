@@ -13,9 +13,15 @@ if not exist "%SETUORA_BUILDER%" goto missing_package
 
 call :find_python
 if not defined SETUORA_PYTHON (
-    echo Python 3.11 or newer is required to build the Windows installer.
-    echo Install Python from https://www.python.org/downloads/windows/
-    echo and select "Add python.exe to PATH", then try again.
+    call :install_python
+)
+if not defined SETUORA_PYTHON (
+    echo.
+    echo Python 3.11 could not be installed automatically.
+    echo For a client PC, use the prebuilt delivery archive instead:
+    echo dist\Setuora-Lite-VERSION-Windows.zip
+    echo.
+    echo This source-checkout shortcut is intended for developers.
     pause
     exit /b 1
 )
@@ -69,6 +75,31 @@ if not errorlevel 1 (
     python3 -c "import sys; raise SystemExit(sys.version_info ^< (3, 11))" >nul 2>&1
     if not errorlevel 1 set "SETUORA_PYTHON=python3"
 )
+if defined SETUORA_PYTHON goto :eof
+if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
+    "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" -c "import sys; raise SystemExit(sys.version_info ^< (3, 11))" >nul 2>&1
+    if not errorlevel 1 set SETUORA_PYTHON="%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+)
+if defined SETUORA_PYTHON goto :eof
+if exist "%ProgramFiles%\Python311\python.exe" (
+    "%ProgramFiles%\Python311\python.exe" -c "import sys; raise SystemExit(sys.version_info ^< (3, 11))" >nul 2>&1
+    if not errorlevel 1 set SETUORA_PYTHON="%ProgramFiles%\Python311\python.exe"
+)
+goto :eof
+
+:install_python
+where winget >nul 2>&1
+if errorlevel 1 (
+    echo Windows Package Manager is unavailable, so Python cannot be installed automatically.
+    goto :eof
+)
+echo Python 3.11 is missing. Installing it automatically with Windows Package Manager...
+winget install --id Python.Python.3.11 --exact --source winget --scope user --accept-package-agreements --accept-source-agreements --disable-interactivity
+if errorlevel 1 (
+    echo Windows Package Manager could not install Python 3.11.
+    goto :eof
+)
+call :find_python
 goto :eof
 
 :missing_package
