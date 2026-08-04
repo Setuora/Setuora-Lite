@@ -63,6 +63,14 @@ MASTER_REQUEST_TIMEOUT_SECONDS=15
 MASTER_TLS_VERIFY=true
 ```
 
+Franchise admins and super admins can update the same connection values from
+`Master connection → Connection settings`. Frontend-managed values override
+the deployment defaults and are written with owner-only permissions to
+`data/master-connection.env` (or `/srv/setuora/data/master-connection.env` in
+the supported container). The credential field is write-only: leaving it blank
+keeps the stored credential, and its value is never rendered back into HTML.
+The permanent franchise code becomes uneditable after the first outbox event.
+
 Rules:
 
 - `FRANCHISE_CODE` must equal the unique code enrolled in Master.
@@ -80,9 +88,9 @@ skip-verification rollout.
 Enabled Lite startup fails fast when the franchise code, HTTPS URL, or API key
 is missing. The deployment helper additionally verifies that the credential's
 authenticated `GET /api/v1/node` franchise code matches `FRANCHISE_CODE`. The
-key currently lives in `.env`, so production requires service-account
-filesystem ACLs, redacted logs/backups, an approved secret transfer channel,
-and a tested rotation procedure.
+key lives in `.env` or the protected frontend-managed runtime file, so
+production requires service-account filesystem ACLs, redacted logs/backups, an
+approved secret transfer channel, and a tested rotation procedure.
 
 ## Local Event Outbox
 

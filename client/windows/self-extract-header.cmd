@@ -9,6 +9,8 @@ set "SETUORA_EXIT=%ERRORLEVEL%"
 echo.
 if "%SETUORA_EXIT%"=="0" (
   echo Setuora Lite completed successfully.
+) else if "%SETUORA_EXIT%"=="3010" (
+  echo A Windows restart is required. Setup will resume automatically after sign-in.
 ) else (
   echo Setuora Lite did not complete. Review the message above.
 )

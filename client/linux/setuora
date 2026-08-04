@@ -3,12 +3,141 @@ set -Eeuo pipefail
 
 PACKAGE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$PACKAGE_DIR"
+say_section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+confirm() {
+  local prompt="$1"
+  local answer
+  if [ ! -t 0 ]; then
+    echo "$prompt requires an interactive terminal." >&2
+    return 1
+  fi
+  read -r -p "$prompt [Y/n]: " answer
+  case "${answer,,}" in
+    ""|y|yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+    return
+  fi
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "Administrator access is required, but sudo is not installed." >&2
+    exit 1
+  fi
+  sudo "$@"
+}
+
+install_base_packages() {
+  say_section "Install required system tools"
+  if command -v apt-get >/dev/null 2>&1; then
+    run_as_root apt-get update
+    run_as_root apt-get install -y ca-certificates curl python3
+  elif command -v dnf >/dev/null 2>&1; then
+    run_as_root dnf install -y ca-certificates curl python3
+  elif command -v yum >/dev/null 2>&1; then
+    run_as_root yum install -y ca-certificates curl python3
+  elif command -v zypper >/dev/null 2>&1; then
+    run_as_root zypper --non-interactive install ca-certificates curl python3
+  else
+    echo "This Linux distribution does not have a supported automatic package manager." >&2
+    echo "Supported automatic setup: apt, dnf, yum, or zypper." >&2
+    exit 1
+  fi
+}
+
+install_docker() {
+  local temporary_directory
+  if ! confirm "Docker Engine is missing. Install the official Docker Engine and Compose plugin now?"; then
+    echo "Docker Engine is required to run Setuora Lite." >&2
+    exit 1
+  fi
+  command -v curl >/dev/null 2>&1 || install_base_packages
+  temporary_directory="$(mktemp -d -t setuora-docker-install.XXXXXXXX)"
+  trap 'rm -rf -- "$temporary_directory"' RETURN
+  say_section "Install Docker Engine"
+  curl --fail --show-error --silent --location \
+    https://get.docker.com \
+    --output "$temporary_directory/get-docker.sh"
+  run_as_root sh "$temporary_directory/get-docker.sh"
+  if command -v systemctl >/dev/null 2>&1; then
+    run_as_root systemctl enable --now docker.service
+    run_as_root systemctl enable containerd.service
+  fi
+  run_as_root groupadd --force docker
+  if [ "$(id -u)" -ne 0 ]; then
+    run_as_root usermod -aG docker "$(id -un)"
+  fi
+  rm -rf -- "$temporary_directory"
+  trap - RETURN
+}
+
+env_value() {
+  local name="$1"
+  local default_value="${2:-}"
+  local value
+  value="$(awk -F= -v key="$name" '$1 == key { value = substr($0, index($0, "=") + 1) } END { print value }' "$PACKAGE_DIR/.env" 2>/dev/null || true)"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  printf '%s\n' "${value:-$default_value}"
+}
+
+complete_linux_setup() {
+  local certificate bind_address http_port https_port hostname authority url address_cidr network
+  certificate="$PACKAGE_DIR/setuora-lite-root-ca.crt"
+  if [ -f "$certificate" ] && confirm "Trust this installation's private LAN certificate authority on this server?"; then
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+      run_as_root install -m 0644 "$certificate" /usr/local/share/ca-certificates/setuora-lite-root-ca.crt
+      run_as_root update-ca-certificates
+    elif command -v update-ca-trust >/dev/null 2>&1; then
+      run_as_root install -m 0644 "$certificate" /etc/pki/ca-trust/source/anchors/setuora-lite-root-ca.crt
+      run_as_root update-ca-trust extract
+    else
+      echo "Automatic CA trust is unavailable on this distribution. The public CA is: $certificate" >&2
+    fi
+  fi
+
+  bind_address="$(env_value SETUORA_LAN_BIND_ADDRESS)"
+  http_port="$(env_value SETUORA_HTTP_PORT 80)"
+  https_port="$(env_value SETUORA_HTTPS_PORT 443)"
+  address_cidr="$(ip -o -4 addr show 2>/dev/null | awk -v address="$bind_address" '$4 ~ ("^" address "/") { print $4; exit }')"
+  if [ -n "$address_cidr" ]; then
+    network="$($PYTHON_COMMAND -c 'import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$address_cidr")"
+    if command -v ufw >/dev/null 2>&1 && run_as_root ufw status | grep -q '^Status: active$'; then
+      run_as_root ufw allow from "$network" to "$bind_address" port "$http_port" proto tcp
+      run_as_root ufw allow from "$network" to "$bind_address" port "$https_port" proto tcp
+    elif command -v firewall-cmd >/dev/null 2>&1 && run_as_root firewall-cmd --state >/dev/null 2>&1; then
+      run_as_root firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=$network destination address=$bind_address port port=$http_port protocol=tcp accept"
+      run_as_root firewall-cmd --permanent --add-rich-rule="rule family=ipv4 source address=$network destination address=$bind_address port port=$https_port protocol=tcp accept"
+      run_as_root firewall-cmd --reload
+    fi
+  fi
+
+  hostname="$(env_value SETUORA_LAN_HOSTNAME "$bind_address")"
+  authority="$hostname"
+  if [ "$https_port" != "443" ]; then
+    authority="$hostname:$https_port"
+  fi
+  url="https://$authority"
+  printf '\nSetuora Lite is fully installed: %s\n' "$url"
+  printf 'Install this public CA on each approved phone/workstation: %s\n' "$certificate"
+  if command -v xdg-open >/dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    xdg-open "$url" >/dev/null 2>&1 || true
+  fi
+}
 
 find_python() {
   local candidate
-  for candidate in python3.11 python3 python; do
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3 python; do
     if command -v "$candidate" >/dev/null 2>&1 \
-      && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' \
+      && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' \
         >/dev/null 2>&1; then
       printf '%s\n' "$candidate"
       return 0
@@ -17,20 +146,65 @@ find_python() {
   return 1
 }
 
+ACTION="${1:-}"
+if ! PYTHON_COMMAND="$(find_python)"; then
+  if [ "$ACTION" != "setup" ]; then
+    echo "Python 3.10 or newer is required. Run this installer again to repair prerequisites." >&2
+    exit 1
+  fi
+  if ! confirm "Python 3.10 or newer is missing. Install the distribution's Python package now?"; then
+    echo "Python is required by the Setuora deployment controller." >&2
+    exit 1
+  fi
+  install_base_packages
+  if ! PYTHON_COMMAND="$(find_python)"; then
+    echo "The installed Python is older than 3.10. Use a currently supported Ubuntu, Debian, Fedora, RHEL, CentOS, or openSUSE release." >&2
+    exit 1
+  fi
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker Engine is required. Install Docker Engine with Compose v2, then run this again." >&2
-  echo "Linux instructions: https://docs.docker.com/engine/install/" >&2
-  exit 1
+  if [ "$ACTION" != "setup" ]; then
+    echo "Docker Engine is required. Run this installer again to repair prerequisites." >&2
+    exit 1
+  fi
+  install_docker
 fi
 
 if ! docker compose version >/dev/null 2>&1; then
-  echo "Docker Compose v2 is required (the command must be: docker compose)." >&2
+  echo "Docker Compose v2 was not found after installation." >&2
   exit 1
 fi
 
-if ! PYTHON_COMMAND="$(find_python)"; then
-  echo "Python 3.11 or newer is required. Install it, then run this again." >&2
-  exit 1
-fi
+run_with_docker_access() {
+  if docker info >/dev/null 2>&1; then
+    "$PYTHON_COMMAND" "$PACKAGE_DIR/deploy.py" "$@"
+    return
+  fi
 
-exec "$PYTHON_COMMAND" "$PACKAGE_DIR/deploy.py" "$@"
+  # Docker group membership added during this run is not visible in the current
+  # login session. Start the controller with that group immediately, avoiding a
+  # logout/reboot for a non-technical installer operator.
+  if [ "$(id -u)" -ne 0 ] \
+    && command -v sg >/dev/null 2>&1 \
+    && getent group docker 2>/dev/null | awk -F: -v user="$(id -un)" '
+         $1 == "docker" {
+           count = split($4, members, ",")
+           for (index = 1; index <= count; index++) if (members[index] == user) found = 1
+         }
+         END { exit(found ? 0 : 1) }
+       '; then
+    printf -v controller_command '%q ' "$PYTHON_COMMAND" "$PACKAGE_DIR/deploy.py" "$@"
+    sg docker -c "exec ${controller_command}"
+    return
+  fi
+
+  echo "Docker is installed, but this user cannot access the running engine." >&2
+  echo "Sign out and sign back in, then run the installer again." >&2
+  return 1
+}
+
+run_with_docker_access "$@"
+if [ "$ACTION" = "setup" ]; then
+  complete_linux_setup
+fi

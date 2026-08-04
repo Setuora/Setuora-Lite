@@ -147,6 +147,38 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _write_delivery_zip(
+    destination: Path,
+    installer: Path,
+    *,
+    installer_name: str,
+    platform: str,
+) -> None:
+    instructions = (
+        f"Setuora Lite - {platform}\n\n"
+        "1. Extract this ZIP file.\n"
+        f"2. Run '{installer_name}'.\n"
+        "3. Approve administrator access and follow the guided prompts.\n\n"
+        "Keep the window open until it reports that Setuora Lite is fully installed.\n"
+    ).encode("utf-8")
+    with zipfile.ZipFile(
+        destination,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+    ) as archive:
+        installer_info = zipfile.ZipInfo(installer_name, (1980, 1, 1, 0, 0, 0))
+        installer_info.compress_type = zipfile.ZIP_DEFLATED
+        installer_mode = 0o755 if platform == "Linux" else 0o644
+        installer_info.external_attr = (stat.S_IFREG | installer_mode) << 16
+        archive.writestr(installer_info, installer.read_bytes())
+
+        readme_info = zipfile.ZipInfo("START HERE.txt", (1980, 1, 1, 0, 0, 0))
+        readme_info.compress_type = zipfile.ZIP_DEFLATED
+        readme_info.external_attr = (stat.S_IFREG | 0o644) << 16
+        archive.writestr(readme_info, instructions)
+
+
 def build_packages(
     version: str,
     output_directory: Path = DEFAULT_OUTPUT,
@@ -200,9 +232,25 @@ def build_packages(
         )
 
     checksum_path = output_directory / f"Setuora-Lite-{version}-SHA256SUMS.txt"
+    linux_delivery = output_directory / f"Setuora-Lite-{version}-Linux.zip"
+    windows_delivery = output_directory / f"Setuora-Lite-{version}-Windows.zip"
+    _write_delivery_zip(
+        linux_delivery,
+        linux_path,
+        installer_name="Install Setuora Lite.run",
+        platform="Linux",
+    )
+    _write_delivery_zip(
+        windows_delivery,
+        windows_path,
+        installer_name="Install Setuora Lite.cmd",
+        platform="Windows",
+    )
     checksum_path.write_text(
         f"{_sha256(linux_path)}  {linux_path.name}\n"
-        f"{_sha256(windows_path)}  {windows_path.name}\n",
+        f"{_sha256(windows_path)}  {windows_path.name}\n"
+        f"{_sha256(linux_delivery)}  {linux_delivery.name}\n"
+        f"{_sha256(windows_delivery)}  {windows_delivery.name}\n",
         encoding="utf-8",
     )
     return linux_path, windows_path
@@ -223,6 +271,8 @@ def main() -> int:
     )
     print(linux_path)
     print(windows_path)
+    print(linux_path.parent / f"Setuora-Lite-{args.version}-Linux.zip")
+    print(linux_path.parent / f"Setuora-Lite-{args.version}-Windows.zip")
     print(linux_path.parent / f"Setuora-Lite-{args.version}-SHA256SUMS.txt")
     return 0
 

@@ -11,6 +11,7 @@ data/*.db-shm
 data/*.db-wal
 data/backups/
 data/backup-settings.env
+data/master-connection.env
 data/schema-backups/
 data/secret_key
 .pytest_cache/

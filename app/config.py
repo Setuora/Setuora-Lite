@@ -49,16 +49,25 @@ BACKUP_RUNTIME_ENV_KEYS = {
     "BACKUP_INTERVAL_HOURS",
     "BACKUP_RETENTION_COUNT",
 }
+MASTER_CONNECTION_RUNTIME_ENV_KEYS = {
+    "FRANCHISE_CODE",
+    "MASTER_SYNC_ENABLED",
+    "MASTER_URL",
+    "MASTER_API_KEY",
+    "MASTER_SYNC_INTERVAL_SECONDS",
+    "MASTER_REQUEST_TIMEOUT_SECONDS",
+    "MASTER_TLS_VERIFY",
+}
 
 
-def _load_env_file(
+def _read_env_file(
     path: Path,
     *,
     allowed_keys: set[str] | None = None,
-    override: bool = False,
-) -> None:
+) -> dict[str, str]:
+    values: dict[str, str] = {}
     if not path.exists():
-        return
+        return values
 
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -75,7 +84,17 @@ def _load_env_file(
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
+        values[key] = value
+    return values
 
+
+def _load_env_file(
+    path: Path,
+    *,
+    allowed_keys: set[str] | None = None,
+    override: bool = False,
+) -> None:
+    for key, value in _read_env_file(path, allowed_keys=allowed_keys).items():
         if override:
             os.environ[key] = value
         else:
@@ -102,6 +121,10 @@ def _flag(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _flag_value(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _comma_separated(name: str, default: str) -> list[str]:
     return [value.strip().lower() for value in os.getenv(name, default).split(",") if value.strip()]
 
@@ -123,7 +146,7 @@ def _resolve_secret_key() -> str:
         return env_value or DEFAULT_SECRET_KEY
 
 
-def _master_url_configuration_error(value: str) -> str | None:
+def master_url_configuration_error(value: str) -> str | None:
     try:
         parsed = urlsplit(value)
         port = parsed.port
@@ -148,8 +171,49 @@ def _master_url_configuration_error(value: str) -> str | None:
     return None
 
 
+def master_connection_settings_path() -> Path:
+    configured = os.getenv("MASTER_CONNECTION_SETTINGS_FILE", "").strip()
+    path = Path(configured) if configured else PROJECT_ROOT / "data" / "master-connection.env"
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return path
+
+
+def save_master_connection_settings(values: dict[str, str]) -> None:
+    unexpected = set(values) - MASTER_CONNECTION_RUNTIME_ENV_KEYS
+    if unexpected:
+        raise ValueError(f"Unsupported Master setting(s): {', '.join(sorted(unexpected))}")
+    if any("\n" in value or "\r" in value for value in values.values()):
+        raise ValueError("Master settings cannot contain line breaks.")
+
+    path = master_connection_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    content = "".join(f"{key}={values[key]}\n" for key in sorted(values))
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        path.chmod(0o600)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    get_settings.cache_clear()
+
+
 class Settings:
     def __init__(self) -> None:
+        master_runtime = _read_env_file(
+            master_connection_settings_path(),
+            allowed_keys=MASTER_CONNECTION_RUNTIME_ENV_KEYS,
+        )
+
+        def master_value(name: str, default: str = "") -> str:
+            return master_runtime.get(name, os.getenv(name, default))
+
         self.app_mode: str = os.getenv("SETUORA_APP_MODE", "lite").strip().lower()
         self.allow_legacy_test_mode: bool = _flag(
             "SETUORA_ALLOW_LEGACY_TEST_MODE",
@@ -184,19 +248,23 @@ class Settings:
         self.backup_retention_count: int = int(os.getenv("BACKUP_RETENTION_COUNT", "14"))
         self.backup_startup_delay_seconds: int = int(os.getenv("BACKUP_STARTUP_DELAY_SECONDS", "60"))
         self.container_deployment: bool = _flag("SETUORA_CONTAINER_DEPLOYMENT", "false")
-        self.franchise_code: str = os.getenv("FRANCHISE_CODE", "").strip().upper()
-        self.master_url: str = os.getenv("MASTER_URL", "").strip().rstrip("/")
-        self.master_api_key: str = os.getenv("MASTER_API_KEY", "").strip()
-        self.master_sync_enabled: bool = _flag("MASTER_SYNC_ENABLED", "false")
+        self.franchise_code: str = master_value("FRANCHISE_CODE").strip().upper()
+        self.master_url: str = master_value("MASTER_URL").strip().rstrip("/")
+        self.master_api_key: str = master_value("MASTER_API_KEY").strip()
+        self.master_sync_enabled: bool = _flag_value(
+            master_value("MASTER_SYNC_ENABLED", "false")
+        )
         self.master_sync_interval_seconds: int = max(
             15,
-            int(os.getenv("MASTER_SYNC_INTERVAL_SECONDS", "30")),
+            int(master_value("MASTER_SYNC_INTERVAL_SECONDS", "30")),
         )
         self.master_request_timeout_seconds: int = max(
             3,
-            int(os.getenv("MASTER_REQUEST_TIMEOUT_SECONDS", "15")),
+            int(master_value("MASTER_REQUEST_TIMEOUT_SECONDS", "15")),
         )
-        self.master_tls_verify: bool = _flag("MASTER_TLS_VERIFY", "true")
+        self.master_tls_verify: bool = _flag_value(
+            master_value("MASTER_TLS_VERIFY", "true")
+        )
 
     @property
     def using_default_secret(self) -> bool:
@@ -212,7 +280,7 @@ class Settings:
             or FRANCHISE_CODE_PATTERN.fullmatch(self.franchise_code) is None
         ):
             return "FRANCHISE_CODE must be a permanent, unique code of at most 40 characters."
-        master_url_error = _master_url_configuration_error(self.master_url)
+        master_url_error = master_url_configuration_error(self.master_url)
         if master_url_error:
             return master_url_error
         if MASTER_API_KEY_PATTERN.fullmatch(self.master_api_key) is None:

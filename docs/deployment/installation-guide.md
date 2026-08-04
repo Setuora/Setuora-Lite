@@ -24,11 +24,11 @@ inbound WAN connection.
 
 ## Prerequisites
 
-On the franchise server:
+On the franchise server when using the guided client installer:
 
-- Linux with Docker Engine/Compose v2, or Windows with Docker Desktop using
-  Linux containers;
-- Docker configured to start after host reboot;
+- a current x86-64 Linux release with apt/dnf/yum/zypper, or a supported
+  x86-64 Windows 10/11 computer with WSL 2 capability and at least 8 GB RAM;
+- administrator/sudo approval so the installer can add and start Docker;
 - a reserved private LAN IPv4 address;
 - TCP 80/443 allowed from the approved local subnet only;
 - reliable system time and outbound Internet access.
@@ -86,10 +86,10 @@ offline-tolerant restarts.
 
 ## Install Without Git
 
-For franchise delivery, build and send the platform-specific single-file
-installer described in [Client packages](client-packages.md). Linux receives
-one `.run` file and Windows receives one double-clickable `.cmd` file. The same
-package handles initial setup and later updates through the reviewed
+For franchise delivery, build and send the platform-specific ZIP described in
+[Client packages](client-packages.md). Linux receives the `Linux.zip` and
+Windows receives the `Windows.zip`; each contains one clearly named installer.
+The same package handles prerequisites, initial setup, and later updates through the reviewed
 `deploy.py` workflow while preserving `.env` and all named Docker volumes.
 
 ## LAN Certificate

@@ -7,6 +7,7 @@ from urllib.error import HTTPError, URLError
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from starlette.requests import Request
 
@@ -434,6 +435,159 @@ def test_admin_initialization_does_not_enqueue_when_master_preflight_fails(
     assert response.status_code == 303
     assert "error=" in response.headers["location"]
     assert db_session.scalar(select(func.count(MasterOutboxEvent.id))) == 0
+
+
+def test_franchise_admin_can_save_master_connection_settings(
+    db_session,
+    monkeypatch,
+):
+    user = User(username="connection-admin", password_hash="x", role="admin")
+    db_session.add(user)
+    db_session.commit()
+    saved = []
+    monkeypatch.setattr(
+        lite_sync_router,
+        "get_settings",
+        lambda: _settings(master_api_key="setuora-node.old." + "o" * 32),
+    )
+    monkeypatch.setattr(
+        lite_sync_router,
+        "save_master_connection_settings",
+        lambda values: saved.append(values),
+    )
+
+    response = lite_sync_router.update_master_connection_settings(
+        _request(user.id, "/master-connection/settings", app_mode="lite"),
+        franchise_code="blr-01",
+        master_url="https://setuora-master.example.ts.net/",
+        master_api_key="setuora-node.new." + "n" * 32,
+        master_sync_enabled="true",
+        master_sync_interval_seconds="45",
+        master_request_timeout_seconds="10",
+        db=db_session,
+    )
+
+    assert response.status_code == 303
+    assert saved == [
+        {
+            "FRANCHISE_CODE": "BLR-01",
+            "MASTER_API_KEY": "setuora-node.new." + "n" * 32,
+            "MASTER_REQUEST_TIMEOUT_SECONDS": "10",
+            "MASTER_SYNC_ENABLED": "true",
+            "MASTER_SYNC_INTERVAL_SECONDS": "45",
+            "MASTER_TLS_VERIFY": "true",
+            "MASTER_URL": "https://setuora-master.example.ts.net",
+        }
+    ]
+
+
+def test_blank_connection_credential_preserves_stored_secret(
+    db_session,
+    monkeypatch,
+):
+    user = User(username="credential-admin", password_hash="x", role="super_admin")
+    db_session.add(user)
+    db_session.commit()
+    stored_credential = "setuora-node.existing." + "s" * 32
+    saved = []
+    monkeypatch.setattr(
+        lite_sync_router,
+        "get_settings",
+        lambda: _settings(master_api_key=stored_credential),
+    )
+    monkeypatch.setattr(
+        lite_sync_router,
+        "save_master_connection_settings",
+        lambda values: saved.append(values),
+    )
+
+    response = lite_sync_router.update_master_connection_settings(
+        _request(user.id, "/master-connection/settings", app_mode="lite"),
+        franchise_code="BLR-01",
+        master_url="https://setuora-master.example.ts.net",
+        master_api_key="",
+        master_sync_enabled=None,
+        master_sync_interval_seconds="30",
+        master_request_timeout_seconds="15",
+        db=db_session,
+    )
+
+    assert response.status_code == 303
+    assert saved[0]["MASTER_API_KEY"] == stored_credential
+    assert saved[0]["MASTER_SYNC_ENABLED"] == "false"
+
+
+def test_non_admin_cannot_save_master_connection_settings(
+    db_session,
+    monkeypatch,
+):
+    user = User(username="connection-sales", password_hash="x", role="sales")
+    db_session.add(user)
+    db_session.commit()
+    monkeypatch.setattr(
+        lite_sync_router,
+        "save_master_connection_settings",
+        lambda _values: (_ for _ in ()).throw(AssertionError("must not save")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        lite_sync_router.update_master_connection_settings(
+            _request(user.id, "/master-connection/settings", app_mode="lite"),
+            franchise_code="BLR-01",
+            master_url="https://setuora-master.example.ts.net",
+            master_api_key="setuora-node.new." + "n" * 32,
+            master_sync_enabled="true",
+            master_sync_interval_seconds="30",
+            master_request_timeout_seconds="15",
+            db=db_session,
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+def test_franchise_code_cannot_change_after_outbox_event_exists(
+    db_session,
+    monkeypatch,
+):
+    user = User(username="locked-admin", password_hash="x", role="admin")
+    db_session.add(user)
+    db_session.add(
+        MasterOutboxEvent(
+            event_type="HEARTBEAT",
+            aggregate_type="NODE",
+            aggregate_id="existing-event",
+            payload_json="{}",
+            payload_sha256=hashlib.sha256(b"{}").hexdigest(),
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        lite_sync_router,
+        "get_settings",
+        lambda: _settings(
+            franchise_code="BLR-01",
+            master_api_key="setuora-node.old." + "o" * 32,
+        ),
+    )
+    monkeypatch.setattr(
+        lite_sync_router,
+        "save_master_connection_settings",
+        lambda _values: (_ for _ in ()).throw(AssertionError("must not save")),
+    )
+
+    response = lite_sync_router.update_master_connection_settings(
+        _request(user.id, "/master-connection/settings", app_mode="lite"),
+        franchise_code="OTHER-01",
+        master_url="https://setuora-master.example.ts.net",
+        master_api_key="",
+        master_sync_enabled="true",
+        master_sync_interval_seconds="30",
+        master_request_timeout_seconds="15",
+        db=db_session,
+    )
+
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
 
 
 def test_committed_outbox_payload_cannot_be_mutated(

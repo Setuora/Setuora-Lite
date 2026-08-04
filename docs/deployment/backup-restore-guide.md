@@ -14,14 +14,15 @@ The supported Compose deployment keeps four independent state sets:
 
 | State | Default location | Contains |
 | --- | --- | --- |
-| Application data | `setuora-lite_setuora-data` volume | SQLite database, schema safety copies, automatic backups, backup schedule/retention overrides |
-| Lite configuration | `.env` beside `compose.yaml` | Application secret, franchise code, Master URL/node credential, deployment settings |
+| Application data | `setuora-lite_setuora-data` volume | SQLite database, schema safety copies, automatic backups, backup schedule/retention overrides, frontend-managed Master connection overrides |
+| Lite configuration | `.env` beside `compose.yaml` | Application secret, initial Master connection defaults, deployment settings |
 | Tailscale identity | `setuora-lite_tailscale-state` volume | This franchise server's private tailnet device identity |
 | LAN certificate authority | `setuora-lite_caddy-data` volume | Caddy private CA and issued LAN certificates |
 
-The SQLite backup does not contain `.env`, the Tailscale identity, or Caddy's
-private CA. Protect those separately. Never copy a Tailscale state volume to a
-different franchise.
+The SQLite backup does not contain `.env`, the frontend-managed
+`master-connection.env`, the Tailscale identity, or Caddy's private CA. Protect
+those separately. Never copy a Tailscale state volume to a different
+franchise.
 
 ## Database Backup
 
@@ -60,8 +61,10 @@ Do not copy a live `setuora.db` file by itself. SQLite may have active
 
 ## Configuration and Certificate Backup
 
-Keep an encrypted, access-controlled copy of `.env`. It contains the long-lived
-Setuora node credential. The one-off Tailscale enrollment key and bootstrap
+Keep an encrypted, access-controlled copy of `.env` and, when the Master
+connection has been edited in the frontend, the application volume's protected
+`master-connection.env`. One of these contains the active long-lived Setuora
+node credential. The one-off Tailscale enrollment key and bootstrap
 administrator password are cleared after successful setup and should not be
 restored.
 

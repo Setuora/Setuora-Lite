@@ -322,7 +322,8 @@ def test_master_node_check_runs_inside_app_and_through_configured_proxy(
     assert commands[0][:5] == ("exec", "-T", "setuora", "python", "-c")
     script = commands[0][5]
     assert 'ProxyHandler({"https": proxy})' in script
-    assert "MASTER_API_KEY" in script
+    assert "get_settings" in script
+    assert "settings.master_api_key" in script
     assert "setuora-node." not in repr(commands)
 
 

@@ -154,8 +154,10 @@ Build client-ready, self-contained installers from a reviewed release:
 python scripts/build_client_packages.py --version 1.0.0
 ```
 
-This creates a Linux `.run`, a double-clickable Windows `.cmd`, and SHA-256
-checksums in `dist/`. Each package installs or updates the complete Docker
+This creates client-ready Linux/Windows ZIPs, the underlying Linux `.run` and
+double-clickable Windows `.cmd`, and SHA-256 checksums in `dist/`. Each guided
+package installs missing Docker/Python prerequisites with operator approval,
+then installs or updates the complete Docker
 deployment without Git and excludes `.env`, credentials, databases, backups,
 exported certificates, and Docker volume state. See the
 [client package guide](docs/deployment/client-packages.md).

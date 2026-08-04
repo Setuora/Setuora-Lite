@@ -55,8 +55,6 @@ async def master_sync_worker_loop() -> None:
 
 
 def start_master_sync_worker(app: FastAPI) -> None:
-    if not master_sync_enabled():
-        return
     task = getattr(app.state, WORKER_STATE_KEY, None)
     if task and not task.done():
         return

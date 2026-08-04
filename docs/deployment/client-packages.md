@@ -1,9 +1,13 @@
 # Shareable Linux and Windows Client Packages
 
-Setuora Lite releases can be delivered as one self-contained file per platform:
+Setuora Lite releases produce a client-ready ZIP per platform:
 
-- `Setuora-Lite-<version>-linux.run`
-- `Setuora-Lite-<version>-windows.cmd`
+- `Setuora-Lite-<version>-Linux.zip`
+- `Setuora-Lite-<version>-Windows.zip`
+
+The ZIPs contain a clearly named `Install Setuora Lite.run` or
+`Install Setuora Lite.cmd` plus a short `START HERE.txt`. The underlying
+self-contained `.run` and `.cmd` files are also emitted for technical use.
 
 Each self-extracting installer contains the reviewed application, Docker
 Compose deployment, Caddy configuration, deployment documentation, and
@@ -20,7 +24,7 @@ From a reviewed release checkout:
 python scripts/build_client_packages.py --version 1.0.0
 ```
 
-The installers and `Setuora-Lite-<version>-SHA256SUMS.txt` are written to
+The installers, delivery ZIPs, and `Setuora-Lite-<version>-SHA256SUMS.txt` are written to
 `dist/`. Build from a clean, tagged revision, verify the checksums before
 delivery, and retain the exact package used at each franchise for rollback.
 
@@ -29,32 +33,38 @@ The repository root also contains `Linux — Setuora Lite.run` and
 package in `dist/`. On a Windows source checkout, the Windows shortcut builds a
 package first when `dist/` is empty, then launches it. These repository
 shortcuts are not distributable installers; give clients the generated
-`Setuora-Lite-<version>-windows.cmd` file instead.
+`Setuora-Lite-<version>-Windows.zip` file instead.
 
 ## Client prerequisites
 
-- Docker Engine with Compose v2 on Linux, or Docker Desktop using Linux
-  containers on Windows;
-- Python 3.11 or newer;
+- a current x86-64 Linux release with apt/dnf/yum/zypper, or a Docker-supported
+  x86-64 Windows 10/11 build with WSL 2 capability, virtualization, and at
+  least 8 GB RAM;
+- administrator/sudo approval and outbound Internet access;
 - a reserved private LAN address and outbound Internet access;
 - the franchise-specific Master URL, franchise code, Setuora node credential,
   and tagged Tailscale enrollment key.
 
-The package does not silently install or elevate third-party software. Docker
-installation can require a reboot and organization-specific licensing,
-hardening, firewall, and startup configuration.
+The guided package asks before installing third-party prerequisites. On Linux
+it uses Docker's official install script and the distribution package manager.
+On Windows it installs Python with WinGet, downloads Docker Desktop directly
+from Docker, verifies its Authenticode signature, enables/updates WSL 2, and
+starts Docker. The operator must accept Docker's license terms; organizations
+that require a paid Docker Desktop subscription must provide it. A first-time
+WSL enablement can require one reboot, after which setup is registered to
+resume at sign-in.
 
 ## Install
 
-On Linux:
+On Linux, extract the delivery ZIP and run:
 
 ```bash
-chmod +x Setuora-Lite-<version>-linux.run
-./Setuora-Lite-<version>-linux.run
+chmod +x "Install Setuora Lite.run"
+./"Install Setuora Lite.run"
 ```
 
-On Windows, start Docker Desktop and double-click
-`Setuora-Lite-<version>-windows.cmd`.
+On Windows, extract the delivery ZIP and double-click
+`Install Setuora Lite.cmd`, then approve the administrator prompt.
 
 The package extracts to a stable per-user directory:
 
@@ -65,7 +75,8 @@ The package extracts to a stable per-user directory:
 It then delegates setup to the same `deploy.py` workflow as a source checkout.
 Setup validates the franchise identity and network boundary, securely prompts
 for credentials, starts Lite/Caddy/Tailscale, enrolls the Master cursor, exports
-the public Caddy CA, and prints the LAN HTTPS URL.
+the public Caddy CA, configures LAN-only host firewall access where supported,
+trusts the generated CA on the server, and prints/opens the LAN HTTPS URL.
 
 ## Update
 

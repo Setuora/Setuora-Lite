@@ -1,4 +1,5 @@
 import asyncio
+import stat
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -6,7 +7,7 @@ from fastapi import HTTPException
 import pytest
 
 from app.main import create_app
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, save_master_connection_settings
 from app.routers import maintenance
 
 
@@ -168,3 +169,39 @@ def test_runtime_master_configuration_accepts_exact_magicdns_endpoint(monkeypatc
     monkeypatch.setenv("MASTER_TLS_VERIFY", "true")
 
     assert Settings().master_sync_configuration_error is None
+
+
+def test_frontend_master_settings_override_environment_and_are_private(
+    tmp_path,
+    monkeypatch,
+):
+    settings_file = tmp_path / "master-connection.env"
+    monkeypatch.setenv("MASTER_CONNECTION_SETTINGS_FILE", str(settings_file))
+    monkeypatch.setenv("FRANCHISE_CODE", "ENV-01")
+    monkeypatch.setenv("MASTER_SYNC_ENABLED", "false")
+    monkeypatch.setenv("MASTER_URL", "https://environment.example.ts.net")
+    monkeypatch.setenv("MASTER_API_KEY", f"setuora-node.env.{'e' * 40}")
+
+    try:
+        save_master_connection_settings(
+            {
+                "FRANCHISE_CODE": "UI-01",
+                "MASTER_SYNC_ENABLED": "true",
+                "MASTER_URL": "https://frontend.example.ts.net",
+                "MASTER_API_KEY": f"setuora-node.ui.{'u' * 40}",
+                "MASTER_SYNC_INTERVAL_SECONDS": "45",
+                "MASTER_REQUEST_TIMEOUT_SECONDS": "12",
+                "MASTER_TLS_VERIFY": "true",
+            }
+        )
+        settings = get_settings()
+
+        assert settings.franchise_code == "UI-01"
+        assert settings.master_sync_enabled is True
+        assert settings.master_url == "https://frontend.example.ts.net"
+        assert settings.master_api_key == f"setuora-node.ui.{'u' * 40}"
+        assert settings.master_sync_interval_seconds == 45
+        assert settings.master_request_timeout_seconds == 12
+        assert stat.S_IMODE(settings_file.stat().st_mode) == 0o600
+    finally:
+        get_settings.cache_clear()

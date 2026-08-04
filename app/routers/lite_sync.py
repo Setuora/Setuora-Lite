@@ -1,12 +1,20 @@
+from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_user
-from app.config import get_settings
+from app.config import (
+    FRANCHISE_CODE_PATTERN,
+    FRANCHISE_CODE_PLACEHOLDERS,
+    MASTER_API_KEY_PATTERN,
+    get_settings,
+    master_url_configuration_error,
+    save_master_connection_settings,
+)
 from app.database import get_db
 from app.models import (
     Batch,
@@ -31,6 +39,8 @@ from app.templates import templates
 
 router = APIRouter(prefix="/master-connection")
 SYNC_ADMIN_ROLES = {Role.SUPER_ADMIN, Role.ADMIN}
+MAX_SYNC_INTERVAL_SECONDS = 3600
+MAX_REQUEST_TIMEOUT_SECONDS = 120
 
 
 def _require_sync_admin(request: Request, db: Session):
@@ -88,6 +98,8 @@ def master_connection_page(request: Request, db: Session = Depends(get_db)):
             "master_url": settings.master_url or "Not configured",
             "api_key_configured": bool(settings.master_api_key),
             "interval_seconds": settings.master_sync_interval_seconds,
+            "request_timeout_seconds": settings.master_request_timeout_seconds,
+            "identity_locked": outbox_total > 0,
             "configuration_error": settings.master_sync_configuration_error,
             "counts": counts,
             "outbox_total": outbox_total,
@@ -98,6 +110,97 @@ def master_connection_page(request: Request, db: Session = Depends(get_db)):
             "message": request.query_params.get("message"),
             "error": request.query_params.get("error"),
         },
+    )
+
+
+def _connection_form_error(message: str) -> RedirectResponse:
+    return RedirectResponse(
+        f"/master-connection?{urlencode({'error': message})}",
+        status_code=303,
+    )
+
+
+@router.post("/settings")
+def update_master_connection_settings(
+    request: Request,
+    franchise_code: Annotated[str, Form()],
+    master_url: Annotated[str, Form()],
+    master_api_key: Annotated[str, Form()] = "",
+    master_sync_enabled: Annotated[str | None, Form()] = None,
+    master_sync_interval_seconds: Annotated[str, Form()] = "30",
+    master_request_timeout_seconds: Annotated[str, Form()] = "15",
+    db: Session = Depends(get_db),
+):
+    _require_sync_admin(request, db)
+    current = get_settings()
+    normalized_code = franchise_code.strip().upper()
+    normalized_url = master_url.strip().rstrip("/")
+    credential = master_api_key.strip() or current.master_api_key
+    sync_enabled = master_sync_enabled == "true"
+
+    if (
+        not normalized_code
+        or normalized_code in FRANCHISE_CODE_PLACEHOLDERS
+        or len(normalized_code) > 40
+        or FRANCHISE_CODE_PATTERN.fullmatch(normalized_code) is None
+    ):
+        return _connection_form_error(
+            "Franchise code must be a permanent code of at most 40 uppercase letters, numbers, and hyphens."
+        )
+
+    existing_event = db.scalar(select(MasterOutboxEvent.id).limit(1))
+    if existing_event is not None and normalized_code != current.franchise_code:
+        return _connection_form_error(
+            "Franchise code is locked because this node already has outbox events."
+        )
+
+    url_error = master_url_configuration_error(normalized_url)
+    if url_error:
+        return _connection_form_error(url_error.replace("MASTER_URL", "Master URL"))
+    if MASTER_API_KEY_PATTERN.fullmatch(credential) is None:
+        return _connection_form_error(
+            "Enter the node credential in setuora-node.<id>.<secret> format."
+        )
+
+    try:
+        interval = int(master_sync_interval_seconds)
+        timeout = int(master_request_timeout_seconds)
+    except ValueError:
+        return _connection_form_error("Sync interval and request timeout must be whole numbers.")
+    if not 15 <= interval <= MAX_SYNC_INTERVAL_SECONDS:
+        return _connection_form_error(
+            f"Sync interval must be between 15 and {MAX_SYNC_INTERVAL_SECONDS} seconds."
+        )
+    if not 3 <= timeout <= MAX_REQUEST_TIMEOUT_SECONDS:
+        return _connection_form_error(
+            f"Request timeout must be between 3 and {MAX_REQUEST_TIMEOUT_SECONDS} seconds."
+        )
+
+    try:
+        save_master_connection_settings(
+            {
+                "FRANCHISE_CODE": normalized_code,
+                "MASTER_API_KEY": credential,
+                "MASTER_REQUEST_TIMEOUT_SECONDS": str(timeout),
+                "MASTER_SYNC_ENABLED": "true" if sync_enabled else "false",
+                "MASTER_SYNC_INTERVAL_SECONDS": str(interval),
+                "MASTER_TLS_VERIFY": "true",
+                "MASTER_URL": normalized_url,
+            }
+        )
+    except (OSError, ValueError) as exc:
+        return _connection_form_error(f"Could not save Master connection settings: {exc}")
+
+    return RedirectResponse(
+        "/master-connection?"
+        + urlencode(
+            {
+                "message": (
+                    "Master connection settings saved. Use Sync now to verify connectivity."
+                )
+            }
+        ),
+        status_code=303,
     )
 
 

@@ -29,10 +29,14 @@ def test_client_package_builder_creates_safe_complete_platform_archives(tmp_path
 
     linux_path = tmp_path / f"Setuora-Lite-{version}-linux.run"
     windows_path = tmp_path / f"Setuora-Lite-{version}-windows.cmd"
+    linux_delivery = tmp_path / f"Setuora-Lite-{version}-Linux.zip"
+    windows_delivery = tmp_path / f"Setuora-Lite-{version}-Windows.zip"
     checksum_path = tmp_path / f"Setuora-Lite-{version}-SHA256SUMS.txt"
     assert str(linux_path) in result.stdout
     assert linux_path.is_file()
     assert windows_path.is_file()
+    assert linux_delivery.is_file()
+    assert windows_delivery.is_file()
     assert checksum_path.is_file()
     assert os.access(linux_path, os.X_OK)
 
@@ -65,6 +69,19 @@ def test_client_package_builder_creates_safe_complete_platform_archives(tmp_path
     assert f"{windows_root}/deployment/caddy/Caddyfile.container" in windows_members
     assert not any(member_name.lower().endswith(".exe") for member_name in windows_members)
 
+    with zipfile.ZipFile(linux_delivery) as archive:
+        assert set(archive.namelist()) == {
+            "Install Setuora Lite.run",
+            "START HERE.txt",
+        }
+        installer_mode = archive.getinfo("Install Setuora Lite.run").external_attr >> 16
+        assert installer_mode & 0o111
+    with zipfile.ZipFile(windows_delivery) as archive:
+        assert set(archive.namelist()) == {
+            "Install Setuora Lite.cmd",
+            "START HERE.txt",
+        }
+
     for member_name in set(linux_members) | windows_members:
         parts = set(PurePosixPath(member_name).parts)
         assert ".env" not in parts
@@ -75,6 +92,8 @@ def test_client_package_builder_creates_safe_complete_platform_archives(tmp_path
     expected_checksums = {
         linux_path.name: hashlib.sha256(linux_path.read_bytes()).hexdigest(),
         windows_path.name: hashlib.sha256(windows_path.read_bytes()).hexdigest(),
+        linux_delivery.name: hashlib.sha256(linux_delivery.read_bytes()).hexdigest(),
+        windows_delivery.name: hashlib.sha256(windows_delivery.read_bytes()).hexdigest(),
     }
     checksum_lines = checksum_path.read_text(encoding="utf-8").splitlines()
     actual_checksums = {
@@ -113,10 +132,26 @@ def test_windows_launcher_matches_master_powershell_flow():
     assert 'ValidateSet(' in launcher
     assert '"verify-sync"' in launcher
     assert '"export-ca"' in launcher
-    assert 'Get-Command "docker"' in launcher
-    assert "docker compose version" in launcher
+    assert "Install-SetuoraDockerDesktop" in launcher
+    assert "Ensure-SetuoraWsl" in launcher
+    assert "Get-AuthenticodeSignature" in launcher
+    assert "Start-SetuoraDockerDesktop" in launcher
+    assert "New-NetFirewallRule" in launcher
     assert 'sys.version_info < (3, 11)' in launcher
     assert '$PSScriptRoot\\deploy.py' in launcher
+
+
+def test_linux_launcher_installs_and_finishes_prerequisites():
+    launcher = (PROJECT_ROOT / "client" / "linux" / "setuora").read_text(
+        encoding="utf-8"
+    )
+
+    assert "https://get.docker.com" in launcher
+    assert "apt-get install -y ca-certificates curl python3" in launcher
+    assert "usermod -aG docker" in launcher
+    assert "update-ca-certificates" in launcher
+    assert "ufw allow from" in launcher
+    assert "firewall-cmd --permanent --add-rich-rule" in launcher
 
 
 def test_linux_single_file_runs_setup_then_update_without_real_docker(tmp_path):

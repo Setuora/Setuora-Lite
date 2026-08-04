@@ -106,16 +106,18 @@ MASTER_NODE_SCRIPT = """
 import json
 import os
 import urllib.request
+from app.config import get_settings
 
 proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
 if not proxy:
     raise SystemExit("HTTPS proxy is not configured")
-url = os.environ["MASTER_URL"].rstrip("/") + "/api/v1/node"
+settings = get_settings()
+url = settings.master_url.rstrip("/") + "/api/v1/node"
 request = urllib.request.Request(
     url,
     headers={
         "Accept": "application/json",
-        "Authorization": "Bearer " + os.environ["MASTER_API_KEY"],
+        "Authorization": "Bearer " + settings.master_api_key,
     },
 )
 opener = urllib.request.build_opener(
@@ -123,7 +125,7 @@ opener = urllib.request.build_opener(
 )
 with opener.open(
     request,
-    timeout=max(3, int(os.environ.get("MASTER_REQUEST_TIMEOUT_SECONDS", "15"))),
+    timeout=settings.master_request_timeout_seconds,
 ) as response:
     print(response.read().decode("utf-8"))
 """.strip()

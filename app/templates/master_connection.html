@@ -20,6 +20,74 @@
 <section class="panel">
   <div class="section-title">
     <div>
+      <h2>Connection settings</h2>
+      <p class="muted">Editable only by franchise admins and super admins. The node credential is stored securely and is never displayed after saving.</p>
+    </div>
+  </div>
+  <form method="post" action="/master-connection/settings" class="two-col">
+    <label>Franchise code
+      <input
+        name="franchise_code"
+        value="{{ '' if franchise_code == 'Not configured' else franchise_code }}"
+        placeholder="BLR-01"
+        maxlength="40"
+        pattern="[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*"
+        autocomplete="off"
+        {% if identity_locked %}readonly aria-describedby="franchise-code-help"{% endif %}
+        required
+      >
+      <span id="franchise-code-help" class="muted">
+        {% if identity_locked %}Locked because this node already has outbox events.{% else %}Use the permanent code enrolled in Master.{% endif %}
+      </span>
+    </label>
+    <label>Master URL
+      <input
+        name="master_url"
+        type="url"
+        value="{{ '' if master_url == 'Not configured' else master_url }}"
+        placeholder="https://setuora-master.example.ts.net"
+        maxlength="255"
+        autocomplete="url"
+        required
+      >
+      <span class="muted">Exact private https://*.ts.net URL, without a path or port.</span>
+    </label>
+    <label>Node credential
+      <span class="password-field" data-password-field>
+        <input
+          name="master_api_key"
+          type="password"
+          placeholder="{{ 'Leave blank to keep the stored credential' if api_key_configured else 'setuora-node.&lt;id&gt;.&lt;secret&gt;' }}"
+          maxlength="1024"
+          autocomplete="new-password"
+          {% if not api_key_configured %}required{% endif %}
+        >
+        <button class="button small ghost" type="button" data-password-toggle aria-pressed="false">Show</button>
+      </span>
+      <span class="muted">{{ 'A credential is stored. Enter a value only to replace it.' if api_key_configured else 'Paste the one-time node credential issued by Master.' }}</span>
+    </label>
+    <div class="two-col">
+      <label>Sync interval (seconds)
+        <input name="master_sync_interval_seconds" type="number" value="{{ interval_seconds }}" min="15" max="3600" step="1" required>
+      </label>
+      <label>Request timeout (seconds)
+        <input name="master_request_timeout_seconds" type="number" value="{{ request_timeout_seconds }}" min="3" max="120" step="1" required>
+      </label>
+    </div>
+    <label class="checkline span-all">
+      <input name="master_sync_enabled" type="checkbox" value="true" {% if sync_enabled %}checked{% endif %}>
+      Enable background synchronization
+    </label>
+    <div class="save-row span-all">
+      <button class="button primary" type="submit">Save connection settings</button>
+      <span class="muted">TLS certificate verification always remains enabled.</span>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="section-title">
+    <div>
       <h2>Node initialization</h2>
       <p class="muted">Run exactly once, before this franchise records its first normal outbox event.</p>
     </div>
@@ -111,4 +179,5 @@
     </table>
   </div>
 </section>
+<script src="/static/password-toggle.js?v=20260624-expiry-1"></script>
 {% endblock %}

@@ -12,9 +12,9 @@ self-extracting file. The same file handles a new installation and an update:
 
 The franchise server needs:
 
-- a 64-bit Linux host with Docker Engine and Compose v2, or Windows 10/11 with
-  Docker Desktop configured to use Linux containers;
-- Python 3.11 or newer;
+- a current 64-bit Linux release using apt/dnf/yum/zypper, or a supported
+  64-bit Windows 10/11 computer with at least 8 GB RAM and virtualization;
+- administrator/sudo approval and outbound Internet access;
 - a reserved private LAN IPv4 address and outbound Internet access;
 - a one-off Tailscale auth key tagged `tag:setuora-lite`;
 - the private Master `https://*.ts.net` URL;
@@ -22,13 +22,16 @@ The franchise server needs:
 - a unique first administrator password of at least 12 characters.
 
 Use a different Tailscale key and Setuora node credential for every franchise.
+The installer downloads and installs missing Docker/Python prerequisites after
+the operator confirms the applicable third-party license. Tailscale runs as an
+isolated Docker service and is enrolled automatically from the supplied key.
 
 ## Linux
 
-```bash
-chmod +x Setuora-Lite-<version>-linux.run
-./Setuora-Lite-<version>-linux.run
-```
+Extract `Setuora-Lite-<version>-Linux.zip`, then run
+`Install Setuora Lite.run`. If the desktop does not offer **Run in Terminal**,
+open a terminal in that folder and run `chmod +x "Install Setuora Lite.run" &&
+./"Install Setuora Lite.run"`.
 
 Setuora Lite is installed under
 `${XDG_DATA_HOME:-$HOME/.local/share}/setuora/Setuora-Lite-linux`. For daily
@@ -42,9 +45,10 @@ administration:
 
 ## Windows
 
-Start Docker Desktop and double-click
-`Setuora-Lite-<version>-windows.cmd`. Windows may ask you to confirm that you
-trust the local script. Setuora Lite is installed under
+Extract `Setuora-Lite-<version>-Windows.zip` and double-click
+`Install Setuora Lite.cmd`. Approve the Windows administrator prompt. The
+installer adds Python, WSL 2, and Docker Desktop when missing; a newly enabled
+WSL installation can require one automatic-resume reboot. Setuora Lite is installed under
 `%LOCALAPPDATA%\Setuora\Setuora-Lite-windows`.
 
 Daily commands can be run from PowerShell:
