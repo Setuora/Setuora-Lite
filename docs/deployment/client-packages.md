@@ -29,11 +29,19 @@ The installers, delivery ZIPs, and `Setuora-Lite-<version>-SHA256SUMS.txt` are w
 delivery, and retain the exact package used at each franchise for rollback.
 
 The repository root also contains `Linux — Setuora Lite.run` and
-`Windows — Setuora Lite.cmd`. The Linux shortcut launches the newest matching
-package in `dist/`. On a Windows source checkout, the Windows shortcut builds a
-package first when `dist/` is empty, then launches it. These repository
-shortcuts are not distributable installers; give clients the generated
-`Setuora-Lite-<version>-Windows.zip` file instead.
+`Windows — Setuora Lite.cmd`. On a fresh source checkout, either shortcut
+installs a missing Python runtime using the platform package manager, builds a
+`pilot` package when `dist/` is empty, and launches it. Existing packages in
+`dist/` are launched directly. Set `SETUORA_RELEASE_VERSION` to use a different
+local build label. These repository shortcuts are not distributable installers;
+give clients the generated platform ZIP instead.
+
+For a fresh Windows clone, double-click `Windows — Setuora Lite.cmd`. For a
+fresh Linux clone, run:
+
+```bash
+./"Linux — Setuora Lite.run"
+```
 
 ## Client prerequisites
 

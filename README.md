@@ -163,10 +163,28 @@ exported certificates, and Docker volume state. See the
 [client package guide](docs/deployment/client-packages.md).
 
 The repository root shortcut `Linux — Setuora Lite.run` launches the newest
-matching package in `dist/`. On a Windows source checkout,
-`Windows — Setuora Lite.cmd` builds the package when `dist/` is empty and then
-launches it. Distribute the generated `Setuora-Lite-<version>-windows.cmd`, not
-the repository shortcut.
+matching package in `dist/`. From a fresh Linux or Windows clone, the platform
+shortcut installs a missing Python runtime, builds the package when `dist/` is
+empty, and launches the guided setup. Distribute the generated
+`Setuora-Lite-<version>-Windows.zip` or `Setuora-Lite-<version>-Linux.zip`, not
+the repository shortcuts.
+
+Fresh-clone setup on Windows:
+
+1. Clone or download the repository and open its root directory in Explorer.
+2. Double-click `Windows — Setuora Lite.cmd`.
+3. Approve prerequisite installation and administrator prompts.
+
+Fresh-clone setup on Linux:
+
+```bash
+git clone <repository-url> Setuora-Lite
+cd Setuora-Lite
+./"Linux — Setuora Lite.run"
+```
+
+Set `SETUORA_RELEASE_VERSION` before launching to override the default local
+build label, `pilot`.
 
 Like Setuora Master, the Windows package uses a PowerShell lifecycle launcher
 for the same `deploy.py` commands. It contains no executable installer and does

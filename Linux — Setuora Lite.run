@@ -2,19 +2,85 @@
 set -Eeuo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+DIST_DIR="$PROJECT_DIR/dist"
+PACKAGE_BUILDER="$PROJECT_DIR/scripts/build_client_packages.py"
 LATEST_INSTALLER=""
+PYTHON_COMMAND=""
 
-for candidate in "$PROJECT_DIR"/dist/Setuora-Lite-*-linux.run; do
-  [ -f "$candidate" ] || continue
-  if [ -z "$LATEST_INSTALLER" ] || [ "$candidate" -nt "$LATEST_INSTALLER" ]; then
-    LATEST_INSTALLER="$candidate"
+find_installer() {
+  local candidate
+  LATEST_INSTALLER=""
+  for candidate in "$DIST_DIR"/Setuora-Lite-*-linux.run; do
+    [ -f "$candidate" ] || continue
+    if [ -z "$LATEST_INSTALLER" ] || [ "$candidate" -nt "$LATEST_INSTALLER" ]; then
+      LATEST_INSTALLER="$candidate"
+    fi
+  done
+}
+
+find_python() {
+  local candidate
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 \
+      && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' \
+        >/dev/null 2>&1; then
+      PYTHON_COMMAND="$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "Administrator access is required, but sudo is not installed." >&2
+    return 1
   fi
-done
+}
+
+install_python() {
+  echo "Python is missing. Installing it with the system package manager..."
+  if command -v apt-get >/dev/null 2>&1; then
+    run_as_root apt-get update
+    run_as_root apt-get install -y python3
+  elif command -v dnf >/dev/null 2>&1; then
+    run_as_root dnf install -y python3
+  elif command -v yum >/dev/null 2>&1; then
+    run_as_root yum install -y python3
+  elif command -v zypper >/dev/null 2>&1; then
+    run_as_root zypper --non-interactive install python3
+  else
+    echo "Automatic Python installation supports apt, dnf, yum, or zypper." >&2
+    return 1
+  fi
+}
+
+find_installer
 
 if [ -z "$LATEST_INSTALLER" ]; then
-  echo "No Linux Setuora Lite installer was found in: $PROJECT_DIR/dist" >&2
-  echo "Build one with: python scripts/build_client_packages.py --version <version>" >&2
-  exit 1
+  if [ ! -f "$PACKAGE_BUILDER" ]; then
+    echo "The package builder is missing: $PACKAGE_BUILDER" >&2
+    exit 1
+  fi
+  if ! find_python; then
+    install_python
+    if ! find_python; then
+      echo "Python 3.10 or newer could not be installed automatically." >&2
+      exit 1
+    fi
+  fi
+  RELEASE_VERSION="${SETUORA_RELEASE_VERSION:-pilot}"
+  echo "No built Linux package was found. Building version $RELEASE_VERSION..."
+  "$PYTHON_COMMAND" "$PACKAGE_BUILDER" --version "$RELEASE_VERSION"
+  find_installer
+  if [ -z "$LATEST_INSTALLER" ]; then
+    echo "The package build completed, but no Linux installer was found in: $DIST_DIR" >&2
+    exit 1
+  fi
 fi
 
 echo "Launching: $(basename -- "$LATEST_INSTALLER")"

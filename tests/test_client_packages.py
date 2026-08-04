@@ -227,8 +227,11 @@ def test_root_shortcuts_launch_the_newest_platform_installer():
     linux = (PROJECT_ROOT / "Linux — Setuora Lite.run").read_text(encoding="utf-8")
     windows = (PROJECT_ROOT / "Windows — Setuora Lite.cmd").read_text(encoding="utf-8")
 
-    assert "dist/Setuora-Lite-*-linux.run" in linux
+    assert '"$DIST_DIR"/Setuora-Lite-*-linux.run' in linux
     assert '-nt "$LATEST_INSTALLER"' in linux
+    assert "scripts/build_client_packages.py" in linux
+    assert "Installing it with the system package manager" in linux
+    assert '"$PYTHON_COMMAND" "$PACKAGE_BUILDER" --version "$RELEASE_VERSION"' in linux
     assert 'exec "$LATEST_INSTALLER"' in linux
     assert "Setuora-Lite-*-windows.cmd" in windows
     assert "/o:-d" in windows
