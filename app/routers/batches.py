@@ -6,6 +6,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import ADMIN_ROLES, require_permission, require_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import (
     AuditFinding,
@@ -360,17 +361,16 @@ def batch_permission_context(
     user,
     batch: Batch,
 ) -> dict[str, bool]:
-    lite_mode = request_app_mode(request) == "lite"
     action_key = action_key_for_batch(BatchType(batch.batch_type))
     can_edit = role_has_access(db, user.role, action_key)
     can_fefo = can_edit and role_has_access(db, user.role, "fefo_pick", {"edit", "yes"})
-    can_tally_xml = not lite_mode and role_has_access(
+    can_tally_xml = role_has_access(
         db,
         user.role,
         "tally_xml",
         {"edit", "yes"},
     )
-    can_tally_excel_export = not lite_mode and has_any_role(
+    can_tally_excel_export = has_any_role(
         user.role,
         ADMIN_ROLES,
     ) and role_has_access(
@@ -384,11 +384,11 @@ def batch_permission_context(
         "can_fefo": can_fefo,
         "can_tally_xml": can_tally_xml,
         "can_tally_excel_export": can_tally_excel_export,
-        "can_tally_excel_import": not lite_mode and can_fefo,
-        "can_retry_sync": not lite_mode
-        and role_has_access(db, user.role, "tally_sync_retry", {"edit", "yes"}),
-        "can_view_attempts": not lite_mode
-        and role_has_access(db, user.role, "tally_attempts"),
+        "can_tally_excel_import": can_fefo,
+        "can_retry_sync": role_has_access(
+            db, user.role, "tally_sync_retry", {"edit", "yes"}
+        ),
+        "can_view_attempts": role_has_access(db, user.role, "tally_attempts"),
         "can_view_batch_list": role_has_access(db, user.role, "batch_list"),
     }
 
@@ -401,11 +401,8 @@ def request_app_mode(request: Request) -> str:
 
 
 def require_local_tally_mode(request: Request) -> None:
-    if request_app_mode(request) == "lite":
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tally operations are available only on Setuora Master.",
-        )
+    # Both supported Windows compositions use their local Tally gateway.
+    return None
 
 
 def parse_batch_type(value: str) -> BatchType:
@@ -1114,13 +1111,14 @@ def submit_batch(request: Request, batch_id: int, db: Session = Depends(get_db))
     if batch.status != BatchStatus.DRAFT.value:
         return RedirectResponse(f"/batches/{batch.id}", status_code=303)
     lite_mode = request_app_mode(request) == "lite"
+    node_sync_enabled = lite_mode and get_settings().master_sync_enabled
     try:
         validate_sale_returns_complete(db, batch)
         validate_priced_batch(batch)
         apply_batch_statuses(db, batch, user)
         if batch.batch_type == BatchType.AUDIT.value:
             reconcile_audit_batch(db, batch)
-        if lite_mode:
+        if node_sync_enabled:
             batch.status = BatchStatus.PENDING_SYNC.value
             enqueue_batch_submitted_event(db, batch, user=user)
     except (InventoryError, ValueError) as exc:
@@ -1144,7 +1142,7 @@ def submit_batch(request: Request, batch_id: int, db: Session = Depends(get_db))
             status_code=400,
         )
     db.commit()
-    if not lite_mode:
+    if not node_sync_enabled:
         queue_batch_for_sync(db, batch)
     return RedirectResponse(f"/batches/{batch.id}", status_code=303)
 

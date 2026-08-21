@@ -3586,12 +3586,17 @@ table .status,
 
 .status.received,
 .status.sent,
-.status.applied {
+.status.applied,
+.status.approved,
+.status.uploaded,
+.status.imported,
+.status.acknowledged {
   background: var(--ok-bg);
   color: var(--ok-fg);
 }
 
 .status.pending_sync,
+.status.pending,
 .status.generated,
 .status.unassigned,
 .status.draft {
@@ -3609,6 +3614,7 @@ table .status,
 
 .status.failed,
 .status.rejected,
+.status.denied,
 .status.sold,
 .status.damaged,
 .status.missing,

@@ -2,12 +2,12 @@ import asyncio
 import stat
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
-from fastapi import HTTPException
 import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
-from app.main import create_app
 from app.config import Settings, get_settings, save_master_connection_settings
+from app.main import create_app
 from app.routers import maintenance
 
 
@@ -22,7 +22,7 @@ def application_paths(app) -> set[str]:
     return paths
 
 
-def test_lite_composition_owns_stock_operations_but_not_tally_configuration():
+def test_lite_composition_owns_stock_tally_and_sftp_configuration():
     app = create_app("lite")
     paths = application_paths(app)
 
@@ -31,11 +31,12 @@ def test_lite_composition_owns_stock_operations_but_not_tally_configuration():
     assert "/products" in paths
     assert "/serials" in paths
     assert "/transfers" in paths
+    assert "/receipts" in paths
     assert "/master-connection" in paths
     assert "/settings/access" in paths
 
-    assert "/settings" not in paths
-    assert "/tally-check" not in paths
+    assert "/settings" in paths
+    assert "/tally-check" in paths
     assert "/api/v1/events" not in paths
     assert "/docs" not in paths
     assert "/openapi.json" not in paths
@@ -52,18 +53,16 @@ def test_lite_artifact_cannot_enable_master_or_direct_tally_in_production(
         create_app("legacy")
 
 
-def test_lite_blocks_direct_tally_batch_operations():
+def test_lite_exposes_local_tally_batch_operations():
     app = create_app("lite")
     client = TestClient(app, raise_server_exceptions=False)
     try:
-        response = client.get("/batches/1/tally.xml")
+        response = client.get("/batches/1/tally.xml", follow_redirects=False)
     finally:
         client.close()
 
-    assert response.status_code == 404
-    assert response.json()["detail"] == (
-        "Tally operations are available only on Setuora Master."
-    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
 
 
 def test_lite_maintenance_controls_master_sync_worker(monkeypatch):
@@ -105,8 +104,10 @@ def test_lite_maintenance_controls_master_sync_worker(monkeypatch):
 
     assert calls == [
         "stop-master",
+        "stop-tally",
         "stop-backup",
         "start-master",
+        "start-tally",
         "start-backup",
     ]
 
@@ -115,7 +116,10 @@ def test_connected_lite_disables_destructive_browser_recovery(monkeypatch):
     monkeypatch.setattr(
         maintenance,
         "get_settings",
-        lambda: SimpleNamespace(master_sync_enabled=True),
+        lambda: SimpleNamespace(
+            sftp_sync_enabled=True,
+            master_sync_enabled=False,
+        ),
     )
     request = SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(app_mode="lite"))
@@ -125,7 +129,7 @@ def test_connected_lite_disables_destructive_browser_recovery(monkeypatch):
         maintenance._deny_connected_lite_destructive_maintenance(request)
 
     assert exc_info.value.status_code == 409
-    assert "cursor reconciliation" in exc_info.value.detail
+    assert "SFTP exchange state" in exc_info.value.detail
 
 
 @pytest.mark.parametrize(
@@ -133,8 +137,8 @@ def test_connected_lite_disables_destructive_browser_recovery(monkeypatch):
     [
         ("FRANCHISE_CODE", "CHANGE-ME", "FRANCHISE_CODE"),
         ("FRANCHISE_CODE", "INVALID CODE", "FRANCHISE_CODE"),
-        ("MASTER_URL", "https://master.example.com", "MASTER_URL"),
-        ("MASTER_URL", "https://master.example.ts.net/api", "MASTER_URL"),
+        ("MASTER_URL", "http://master.example.com", "MASTER_URL"),
+        ("MASTER_URL", "https://master.example.com/api", "MASTER_URL"),
         ("MASTER_API_KEY", "not-a-node-credential", "MASTER_API_KEY"),
         ("MASTER_TLS_VERIFY", "false", "MASTER_TLS_VERIFY"),
     ],
@@ -147,7 +151,7 @@ def test_runtime_master_configuration_fails_closed(
 ):
     monkeypatch.setenv("MASTER_SYNC_ENABLED", "true")
     monkeypatch.setenv("FRANCHISE_CODE", "SG-NORTH-01")
-    monkeypatch.setenv("MASTER_URL", "https://setuora-master.example.ts.net")
+    monkeypatch.setenv("MASTER_URL", "https://setuora-master.example.com")
     monkeypatch.setenv(
         "MASTER_API_KEY",
         f"setuora-node.node_id.{'k' * 40}",
@@ -158,10 +162,10 @@ def test_runtime_master_configuration_fails_closed(
     assert expected in (Settings().master_sync_configuration_error or "")
 
 
-def test_runtime_master_configuration_accepts_exact_magicdns_endpoint(monkeypatch):
+def test_runtime_master_configuration_accepts_exact_https_endpoint(monkeypatch):
     monkeypatch.setenv("MASTER_SYNC_ENABLED", "true")
     monkeypatch.setenv("FRANCHISE_CODE", "SG-NORTH-01")
-    monkeypatch.setenv("MASTER_URL", "https://setuora-master.example.ts.net")
+    monkeypatch.setenv("MASTER_URL", "https://setuora-master.example.com")
     monkeypatch.setenv(
         "MASTER_API_KEY",
         f"setuora-node.node_id.{'k' * 40}",
@@ -179,7 +183,7 @@ def test_frontend_master_settings_override_environment_and_are_private(
     monkeypatch.setenv("MASTER_CONNECTION_SETTINGS_FILE", str(settings_file))
     monkeypatch.setenv("FRANCHISE_CODE", "ENV-01")
     monkeypatch.setenv("MASTER_SYNC_ENABLED", "false")
-    monkeypatch.setenv("MASTER_URL", "https://environment.example.ts.net")
+    monkeypatch.setenv("MASTER_URL", "https://environment.example.com")
     monkeypatch.setenv("MASTER_API_KEY", f"setuora-node.env.{'e' * 40}")
 
     try:
@@ -187,7 +191,7 @@ def test_frontend_master_settings_override_environment_and_are_private(
             {
                 "FRANCHISE_CODE": "UI-01",
                 "MASTER_SYNC_ENABLED": "true",
-                "MASTER_URL": "https://frontend.example.ts.net",
+                "MASTER_URL": "https://frontend.example.com",
                 "MASTER_API_KEY": f"setuora-node.ui.{'u' * 40}",
                 "MASTER_SYNC_INTERVAL_SECONDS": "45",
                 "MASTER_REQUEST_TIMEOUT_SECONDS": "12",
@@ -198,7 +202,7 @@ def test_frontend_master_settings_override_environment_and_are_private(
 
         assert settings.franchise_code == "UI-01"
         assert settings.master_sync_enabled is True
-        assert settings.master_url == "https://frontend.example.ts.net"
+        assert settings.master_url == "https://frontend.example.com"
         assert settings.master_api_key == f"setuora-node.ui.{'u' * 40}"
         assert settings.master_sync_interval_seconds == 45
         assert settings.master_request_timeout_seconds == 12

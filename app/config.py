@@ -1,10 +1,10 @@
 import os
 import re
 import secrets
+import subprocess  # nosec B404
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
-
 
 DEFAULT_SECRET_KEY = "dev-change-me"
 PLACEHOLDER_SECRET_KEYS = {
@@ -40,6 +40,8 @@ DNS_NAME_PATTERN = re.compile(
 MASTER_API_KEY_PATTERN = re.compile(
     r"^setuora-node\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{32,}$"
 )
+SFTP_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SFTP_HOST_KEY_PATTERN = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SECRET_KEY_FILE = PROJECT_ROOT / "data" / "secret_key"
 BACKUP_RUNTIME_ENV_KEYS = {
@@ -57,6 +59,18 @@ MASTER_CONNECTION_RUNTIME_ENV_KEYS = {
     "MASTER_SYNC_INTERVAL_SECONDS",
     "MASTER_REQUEST_TIMEOUT_SECONDS",
     "MASTER_TLS_VERIFY",
+}
+SFTP_CONNECTION_RUNTIME_ENV_KEYS = {
+    "FRANCHISE_CODE",
+    "SFTP_SYNC_ENABLED",
+    "SFTP_HOST",
+    "SFTP_PORT",
+    "SFTP_USERNAME",
+    "SFTP_PASSWORD",
+    "SFTP_HOST_KEY_SHA256",
+    "SFTP_SYNC_INTERVAL_SECONDS",
+    "SFTP_CONNECT_TIMEOUT_SECONDS",
+    "SFTP_MAX_XML_BYTES",
 }
 
 
@@ -126,7 +140,11 @@ def _flag_value(value: str) -> bool:
 
 
 def _comma_separated(name: str, default: str) -> list[str]:
-    return [value.strip().lower() for value in os.getenv(name, default).split(",") if value.strip()]
+    return [
+        value.strip().lower()
+        for value in os.getenv(name, default).split(",")
+        if value.strip()
+    ]
 
 
 def _resolve_secret_key() -> str:
@@ -151,12 +169,11 @@ def master_url_configuration_error(value: str) -> str | None:
         parsed = urlsplit(value)
         port = parsed.port
     except ValueError:
-        return "MASTER_URL must be an exact https://*.ts.net URL."
+        return "MASTER_URL must be an exact HTTPS origin."
     hostname = (parsed.hostname or "").lower().rstrip(".")
     if (
         parsed.scheme != "https"
-        or not hostname.endswith(".ts.net")
-        or hostname == "ts.net"
+        or not hostname
         or "*" in hostname
         or parsed.username
         or parsed.password
@@ -165,15 +182,38 @@ def master_url_configuration_error(value: str) -> str | None:
         or parsed.fragment
         or parsed.path not in {"", "/"}
     ):
-        return "MASTER_URL must be an exact https://*.ts.net URL without a path or port."
+        return "MASTER_URL must be an exact HTTPS origin without a path or port."
     if DNS_NAME_PATTERN.fullmatch(hostname) is None:
-        return "MASTER_URL contains an invalid MagicDNS hostname."
+        return "MASTER_URL contains an invalid DNS hostname."
+    return None
+
+
+def sftp_host_configuration_error(value: str) -> str | None:
+    host = value.strip().rstrip(".")
+    if not host or "://" in host or "/" in host or "\\" in host or "@" in host:
+        return (
+            "SFTP_HOST must be a DNS name or IP address without a URL scheme or path."
+        )
+    if len(host) > 253:
+        return "SFTP_HOST must be 253 characters or fewer."
+    if DNS_NAME_PATTERN.fullmatch(host) is not None:
+        return None
+    try:
+        from ipaddress import ip_address
+
+        ip_address(host)
+    except ValueError:
+        return "SFTP_HOST must be a valid DNS name or IP address."
     return None
 
 
 def master_connection_settings_path() -> Path:
     configured = os.getenv("MASTER_CONNECTION_SETTINGS_FILE", "").strip()
-    path = Path(configured) if configured else PROJECT_ROOT / "data" / "master-connection.env"
+    path = (
+        Path(configured)
+        if configured
+        else PROJECT_ROOT / "data" / "master-connection.env"
+    )
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()
     return path
@@ -182,7 +222,9 @@ def master_connection_settings_path() -> Path:
 def save_master_connection_settings(values: dict[str, str]) -> None:
     unexpected = set(values) - MASTER_CONNECTION_RUNTIME_ENV_KEYS
     if unexpected:
-        raise ValueError(f"Unsupported Master setting(s): {', '.join(sorted(unexpected))}")
+        raise ValueError(
+            f"Unsupported Master setting(s): {', '.join(sorted(unexpected))}"
+        )
     if any("\n" in value or "\r" in value for value in values.values()):
         raise ValueError("Master settings cannot contain line breaks.")
 
@@ -204,15 +246,80 @@ def save_master_connection_settings(values: dict[str, str]) -> None:
     get_settings.cache_clear()
 
 
+def sftp_connection_settings_path() -> Path:
+    configured = os.getenv("SFTP_CONNECTION_SETTINGS_FILE", "").strip()
+    path = (
+        Path(configured)
+        if configured
+        else PROJECT_ROOT / "data" / "sftp-connection.env"
+    )
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return path
+
+
+def save_sftp_connection_settings(values: dict[str, str]) -> None:
+    unexpected = set(values) - SFTP_CONNECTION_RUNTIME_ENV_KEYS
+    if unexpected:
+        raise ValueError(
+            f"Unsupported SFTP setting(s): {', '.join(sorted(unexpected))}"
+        )
+    if any("\n" in value or "\r" in value for value in values.values()):
+        raise ValueError("SFTP settings cannot contain line breaks.")
+
+    path = sftp_connection_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    content = "".join(f"{key}={values[key]}\n" for key in sorted(values))
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        path.chmod(0o600)
+        if os.name == "nt":
+            try:
+                subprocess.run(  # noqa: S603  # nosec B603
+                    [
+                        "icacls.exe",
+                        str(path),
+                        "/inheritance:r",
+                        "/grant:r",
+                        "*S-1-5-18:F",
+                        "*S-1-5-32-544:F",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                raise OSError(
+                    "Windows could not secure the SFTP credential file."
+                ) from exc
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    get_settings.cache_clear()
+
+
 class Settings:
     def __init__(self) -> None:
         master_runtime = _read_env_file(
             master_connection_settings_path(),
             allowed_keys=MASTER_CONNECTION_RUNTIME_ENV_KEYS,
         )
+        sftp_runtime = _read_env_file(
+            sftp_connection_settings_path(),
+            allowed_keys=SFTP_CONNECTION_RUNTIME_ENV_KEYS,
+        )
 
         def master_value(name: str, default: str = "") -> str:
             return master_runtime.get(name, os.getenv(name, default))
+
+        def sftp_value(name: str, default: str = "") -> str:
+            return sftp_runtime.get(name, os.getenv(name, default))
 
         self.app_mode: str = os.getenv("SETUORA_APP_MODE", "lite").strip().lower()
         self.allow_legacy_test_mode: bool = _flag(
@@ -231,9 +338,15 @@ class Settings:
             "Setuora Lite" if self.app_mode == "lite" else "Setuora",
         )
         self.secret_key: str = _resolve_secret_key()
-        self.database_url: str = os.getenv("DATABASE_URL", "sqlite:///./data/setuora.db")
-        self.session_timeout_minutes: int = int(os.getenv("SESSION_TIMEOUT_MINUTES", "480"))
-        self.bootstrap_admin_username: str = os.getenv("BOOTSTRAP_ADMIN_USERNAME", "admin")
+        self.database_url: str = os.getenv(
+            "DATABASE_URL", "sqlite:///./data/setuora.db"
+        )
+        self.session_timeout_minutes: int = int(
+            os.getenv("SESSION_TIMEOUT_MINUTES", "480")
+        )
+        self.bootstrap_admin_username: str = os.getenv(
+            "BOOTSTRAP_ADMIN_USERNAME", "admin"
+        )
         self.bootstrap_admin_password: str = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
         self.cookie_secure: bool = _flag("SESSION_COOKIE_SECURE")
         self.trusted_hosts: list[str] = _comma_separated(
@@ -241,14 +354,29 @@ class Settings:
         )
         self.login_max_attempts: int = int(os.getenv("LOGIN_MAX_ATTEMPTS", "8"))
         self.login_lockout_minutes: int = int(os.getenv("LOGIN_LOCKOUT_MINUTES", "15"))
-        self.automatic_backups_enabled: bool = _flag("AUTOMATIC_BACKUPS_ENABLED", "true")
+        self.automatic_backups_enabled: bool = _flag(
+            "AUTOMATIC_BACKUPS_ENABLED", "true"
+        )
         self.backup_directory: str = os.getenv("BACKUP_DIRECTORY", "./data/backups")
-        self.backup_offsite_directory: str = os.getenv("BACKUP_OFFSITE_DIRECTORY", "").strip()
+        self.backup_offsite_directory: str = os.getenv(
+            "BACKUP_OFFSITE_DIRECTORY", ""
+        ).strip()
         self.backup_interval_hours: int = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
-        self.backup_retention_count: int = int(os.getenv("BACKUP_RETENTION_COUNT", "14"))
-        self.backup_startup_delay_seconds: int = int(os.getenv("BACKUP_STARTUP_DELAY_SECONDS", "60"))
+        self.backup_retention_count: int = int(
+            os.getenv("BACKUP_RETENTION_COUNT", "14")
+        )
+        self.backup_startup_delay_seconds: int = int(
+            os.getenv("BACKUP_STARTUP_DELAY_SECONDS", "60")
+        )
         self.container_deployment: bool = _flag("SETUORA_CONTAINER_DEPLOYMENT", "false")
-        self.franchise_code: str = master_value("FRANCHISE_CODE").strip().upper()
+        self.franchise_code: str = (
+            sftp_runtime.get(
+                "FRANCHISE_CODE",
+                master_runtime.get("FRANCHISE_CODE", os.getenv("FRANCHISE_CODE", "")),
+            )
+            .strip()
+            .upper()
+        )
         self.master_url: str = master_value("MASTER_URL").strip().rstrip("/")
         self.master_api_key: str = master_value("MASTER_API_KEY").strip()
         self.master_sync_enabled: bool = _flag_value(
@@ -265,10 +393,33 @@ class Settings:
         self.master_tls_verify: bool = _flag_value(
             master_value("MASTER_TLS_VERIFY", "true")
         )
+        self.sftp_sync_enabled: bool = _flag_value(
+            sftp_value("SFTP_SYNC_ENABLED", "false")
+        )
+        self.sftp_host: str = sftp_value("SFTP_HOST").strip()
+        self.sftp_port: int = int(sftp_value("SFTP_PORT", "22"))
+        self.sftp_username: str = sftp_value("SFTP_USERNAME").strip()
+        self.sftp_password: str = sftp_value("SFTP_PASSWORD")
+        self.sftp_host_key_sha256: str = sftp_value("SFTP_HOST_KEY_SHA256").strip()
+        self.sftp_sync_interval_seconds: int = max(
+            15,
+            int(sftp_value("SFTP_SYNC_INTERVAL_SECONDS", "60")),
+        )
+        self.sftp_connect_timeout_seconds: int = max(
+            3,
+            int(sftp_value("SFTP_CONNECT_TIMEOUT_SECONDS", "15")),
+        )
+        self.sftp_max_xml_bytes: int = max(
+            1024,
+            int(sftp_value("SFTP_MAX_XML_BYTES", str(10 * 1024 * 1024))),
+        )
 
     @property
     def using_default_secret(self) -> bool:
-        return self.secret_key in PLACEHOLDER_SECRET_KEYS or len(self.secret_key.strip()) < 32
+        return (
+            self.secret_key in PLACEHOLDER_SECRET_KEYS
+            or len(self.secret_key.strip()) < 32
+        )
 
     @property
     def master_sync_configuration_error(self) -> str | None:
@@ -287,6 +438,32 @@ class Settings:
             return "MASTER_API_KEY must use the setuora-node.<id>.<secret> format."
         if not self.master_tls_verify:
             return "MASTER_TLS_VERIFY must remain true for Master synchronization."
+        return None
+
+    @property
+    def sftp_sync_configuration_error(self) -> str | None:
+        if not self.sftp_sync_enabled:
+            return None
+        if (
+            self.franchise_code in FRANCHISE_CODE_PLACEHOLDERS
+            or len(self.franchise_code) > 20
+            or re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{0,19}", self.franchise_code) is None
+        ):
+            return (
+                "FRANCHISE_CODE must be the 1-20 character code enrolled on "
+                "Setuora Master (letters, numbers, underscore, or hyphen)."
+            )
+        host_error = sftp_host_configuration_error(self.sftp_host)
+        if host_error:
+            return host_error
+        if not 1 <= self.sftp_port <= 65535:
+            return "SFTP_PORT must be a number from 1 to 65535."
+        if SFTP_USERNAME_PATTERN.fullmatch(self.sftp_username) is None:
+            return "SFTP_USERNAME contains unsupported characters."
+        if not self.sftp_password:
+            return "SFTP_PASSWORD is required."
+        if SFTP_HOST_KEY_PATTERN.fullmatch(self.sftp_host_key_sha256) is None:
+            return "SFTP_HOST_KEY_SHA256 must be the exact SHA256 fingerprint supplied by Master."
         return None
 
 

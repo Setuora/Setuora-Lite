@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Master connection - Setuora Lite{% endblock %}
+{% block title %}Tally SFTP - Setuora Lite{% endblock %}
 {% block content %}
 <section class="page-head">
   <div>
     <p class="eyebrow">Setuora Lite</p>
-    <h1>Master connection</h1>
-    <p>Franchise events are kept locally until Master acknowledges them.</p>
+    <h1>Tally SFTP</h1>
+    <p>Exchange Sundry Debtors and Sundry Creditors with Setuora Master over its public SFTP endpoint.</p>
   </div>
   <form method="post" action="/master-connection/sync">
     <button class="button primary" type="submit" {% if not sync_enabled or configuration_error %}disabled{% endif %}>Sync now</button>
@@ -15,165 +15,103 @@
 {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 {% if configuration_error %}<div class="alert error">{{ configuration_error }}</div>{% endif %}
-{% if not sync_enabled %}<div class="alert warn">Master synchronization is disabled. Local events will remain safely queued.</div>{% endif %}
+{% if not sync_enabled %}<div class="alert warn">Background SFTP synchronization is disabled.</div>{% endif %}
 
 <section class="panel">
   <div class="section-title">
     <div>
-      <h2>Connection settings</h2>
-      <p class="muted">Editable only by franchise admins and super admins. The node credential is stored securely and is never displayed after saving.</p>
+      <h2>Franchise, Tally, and SFTP settings</h2>
+      <p class="muted">Use the isolated account and SHA256 host-key fingerprint issued by the Master administrator.</p>
     </div>
   </div>
-  <form method="post" action="/master-connection/settings" class="two-col">
-    <label>Franchise code
-      <input
-        name="franchise_code"
-        value="{{ '' if franchise_code == 'Not configured' else franchise_code }}"
-        placeholder="BLR-01"
-        maxlength="40"
-        pattern="[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*"
-        autocomplete="off"
-        {% if identity_locked %}readonly aria-describedby="franchise-code-help"{% endif %}
-        required
-      >
-      <span id="franchise-code-help" class="muted">
-        {% if identity_locked %}Locked because this node already has outbox events.{% else %}Use the permanent code enrolled in Master.{% endif %}
-      </span>
-    </label>
-    <label>Master URL
-      <input
-        name="master_url"
-        type="url"
-        value="{{ '' if master_url == 'Not configured' else master_url }}"
-        placeholder="https://setuora-master.example.ts.net"
-        maxlength="255"
-        autocomplete="url"
-        required
-      >
-      <span class="muted">Exact private https://*.ts.net URL, without a path or port.</span>
-    </label>
-    <label>Node credential
-      <span class="password-field" data-password-field>
-        <input
-          name="master_api_key"
-          type="password"
-          placeholder="{{ 'Leave blank to keep the stored credential' if api_key_configured else 'setuora-node.&lt;id&gt;.&lt;secret&gt;' }}"
-          maxlength="1024"
-          autocomplete="new-password"
-          {% if not api_key_configured %}required{% endif %}
-        >
-        <button class="button small ghost" type="button" data-password-toggle aria-pressed="false">Show</button>
-      </span>
-      <span class="muted">{{ 'A credential is stored. Enter a value only to replace it.' if api_key_configured else 'Paste the one-time node credential issued by Master.' }}</span>
+  <form method="post" action="/master-connection/sftp-settings" class="stack">
+    <div class="two-col">
+      <label>Franchise code
+        <input name="franchise_code" value="{{ '' if franchise_code == 'Not configured' else franchise_code }}" placeholder="BLR-01" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" autocomplete="off" required>
+      </label>
+      <label>Tally company
+        <input name="tally_company" value="{{ tally_company }}" maxlength="220" required>
+      </label>
+    </div>
+    <div class="two-col">
+      <label>Tally host
+        <input name="tally_host" value="{{ tally_host }}" placeholder="127.0.0.1" maxlength="253" required>
+      </label>
+      <label>Tally port
+        <input name="tally_port" type="number" value="{{ tally_port }}" min="1" max="65535" required>
+      </label>
+    </div>
+    <div class="two-col">
+      <label>Master SFTP host / public IP
+        <input name="sftp_host" value="{{ '' if sftp_host == 'Not configured' else sftp_host }}" placeholder="203.0.113.10" maxlength="253" autocomplete="off" required>
+      </label>
+      <label>SFTP port
+        <input name="sftp_port" type="number" value="{{ sftp_port }}" min="1" max="65535" required>
+      </label>
+    </div>
+    <div class="two-col">
+      <label>SFTP username
+        <input name="sftp_username" value="{{ '' if sftp_username == 'Not configured' else sftp_username }}" maxlength="64" autocomplete="username" required>
+      </label>
+      <label>SFTP password
+        <span class="password-field" data-password-field>
+          <input name="sftp_password" type="password" placeholder="{{ 'Leave blank to keep the stored password' if password_configured else 'Password issued by Master' }}" maxlength="1024" autocomplete="new-password" {% if not password_configured %}required{% endif %}>
+          <button class="button small ghost" type="button" data-password-toggle aria-pressed="false">Show</button>
+        </span>
+      </label>
+    </div>
+    <label>SFTP host-key fingerprint
+      <input name="sftp_host_key_sha256" value="{{ host_key_sha256 }}" placeholder="SHA256:..." maxlength="50" autocomplete="off" required>
+      <span class="muted">Verify this out of band with the Master administrator. A mismatch always stops synchronization.</span>
     </label>
     <div class="two-col">
       <label>Sync interval (seconds)
-        <input name="master_sync_interval_seconds" type="number" value="{{ interval_seconds }}" min="15" max="3600" step="1" required>
+        <input name="sftp_sync_interval_seconds" type="number" value="{{ interval_seconds }}" min="15" max="3600" required>
       </label>
-      <label>Request timeout (seconds)
-        <input name="master_request_timeout_seconds" type="number" value="{{ request_timeout_seconds }}" min="3" max="120" step="1" required>
+      <label>Connection timeout (seconds)
+        <input name="sftp_connect_timeout_seconds" type="number" value="{{ request_timeout_seconds }}" min="3" max="120" required>
       </label>
     </div>
-    <label class="checkline span-all">
-      <input name="master_sync_enabled" type="checkbox" value="true" {% if sync_enabled %}checked{% endif %}>
-      Enable background synchronization
+    <label class="checkline">
+      <input name="sftp_sync_enabled" type="checkbox" value="true" {% if sync_enabled %}checked{% endif %}>
+      Enable gated background synchronization
     </label>
-    <div class="save-row span-all">
-      <button class="button primary" type="submit">Save connection settings</button>
-      <span class="muted">TLS certificate verification always remains enabled.</span>
-    </div>
+    <div class="save-row"><button class="button primary" type="submit">Save settings</button></div>
   </form>
+</section>
+
+<div class="alert warn">
+  A new franchise export is not uploaded while Master has an XML waiting in <code>/outbox</code>.
+  Lite creates its <code>/ack</code> file only after local Tally confirms the import.
+</div>
+
+<section class="metric-grid">
+  <div class="metric"><span>Uploaded</span><strong>{{ counts.get('UPLOADED', 0) }}</strong></div>
+  <div class="metric"><span>Imported</span><strong>{{ counts.get('IMPORTED', 0) }}</strong></div>
+  <div class="metric"><span>Acknowledged</span><strong>{{ counts.get('ACKNOWLEDGED', 0) }}</strong></div>
+  <div class="metric warn"><span>Failed / waiting</span><strong>{{ counts.get('FAILED', 0) }}</strong></div>
 </section>
 
 <section class="panel">
   <div class="section-title">
-    <div>
-      <h2>Node initialization</h2>
-      <p class="muted">Run exactly once, before this franchise records its first normal outbox event.</p>
-    </div>
+    <div><h2>Exchange history</h2><p class="muted">Passwords and XML contents are never displayed here.</p></div>
+    <span>Last completed: {{ last_completed.completed_at.strftime('%d %b %Y %H:%M') if last_completed else '-' }}</span>
   </div>
-  <p>
-    {{ initial_inventory_count }} active GENERATED/IN_STOCK QR(s) are eligible.
-    A stocked node queues an inventory snapshot; an empty new node queues an
-    explicit empty heartbeat. Master will still reject a serial collision or
-    ownership conflict.
-  </p>
-  {% if outbox_total == 0 %}
-  <form method="post" action="/master-connection/initialize-inventory" onsubmit="return confirm('Initialize this franchise now? This one-time baseline must precede every normal event.');">
-    <button class="button primary" type="submit" {% if franchise_code == 'Not configured' %}disabled{% endif %}>Initialize node</button>
-  </form>
-  {% else %}
-  <p class="muted">Initialization is locked because this node already has {{ outbox_total }} outbox event(s). Do not delete or resequence them.</p>
-  {% endif %}
-</section>
-
-<section class="metric-grid">
-  <div class="metric"><span>Pending</span><strong>{{ counts.get('PENDING', 0) }}</strong></div>
-  <div class="metric warn"><span>Retrying / failed</span><strong>{{ counts.get('FAILED', 0) }}</strong></div>
-  <div class="metric"><span>Sending</span><strong>{{ counts.get('SENDING', 0) }}</strong></div>
-  <div class="metric"><span>Delivered</span><strong>{{ counts.get('SENT', 0) }}</strong></div>
-</section>
-
-<section class="split">
-  <article class="panel">
-    <h2>Connection</h2>
-    <dl class="details">
-      <dt>Franchise</dt><dd>{{ franchise_code }}</dd>
-      <dt>Master URL</dt><dd>{{ master_url }}</dd>
-      <dt>Credential</dt><dd>{{ 'Configured' if api_key_configured else 'Not configured' }}</dd>
-      <dt>Background sync</dt><dd>{{ 'Enabled' if sync_enabled else 'Disabled' }}</dd>
-      <dt>Interval</dt><dd>{{ interval_seconds }} seconds</dd>
-      <dt>Last delivered</dt><dd>{{ last_sent.sent_at.strftime('%d %b %Y %H:%M') if last_sent and last_sent.sent_at else '-' }}</dd>
-    </dl>
-    <p class="muted">The node credential is never shown in this screen.</p>
-  </article>
-
-  <article class="panel">
-    <h2>Recent commands</h2>
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>Command</th><th>Status</th><th>Received</th></tr></thead>
-        <tbody>
-          {% for command in recent_commands %}
-          <tr>
-            <td>{{ command.command_type }}</td>
-            <td><span class="status {{ command.status|lower }}">{{ command.status }}</span></td>
-            <td>{{ command.received_at.strftime('%d %b %Y %H:%M') }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="3" class="empty">No commands received</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </article>
-</section>
-
-<section class="panel">
-  <h2>Event outbox</h2>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Sequence</th><th>Event</th><th>Reference</th><th>Status</th><th>Attempts</th><th>Last error</th><th>Created</th><th></th></tr></thead>
+      <thead><tr><th>Direction</th><th>File</th><th>Status</th><th>Attempts</th><th>Tally result / error</th><th>Updated</th></tr></thead>
       <tbody>
-        {% for event in recent_events %}
+        {% for exchange in recent_exchanges %}
         <tr>
-          <td>{{ event.id }}</td>
-          <td>{{ event.event_type }}</td>
-          <td>{{ event.aggregate_id }}</td>
-          <td><span class="status {{ event.status|lower }}">{{ event.status }}</span></td>
-          <td>{{ event.attempts }}</td>
-          <td>{{ event.last_error or '-' }}</td>
-          <td>{{ event.created_at.strftime('%d %b %Y %H:%M') }}</td>
-          <td>
-            {% if event.status == 'FAILED' %}
-            <form method="post" action="/master-connection/events/{{ event.id }}/retry">
-              <button class="button small" type="submit">Retry</button>
-            </form>
-            {% endif %}
-          </td>
+          <td>{{ exchange.direction }}</td>
+          <td>{{ exchange.remote_filename }}</td>
+          <td><span class="status {{ exchange.status|lower }}">{{ exchange.status }}</span></td>
+          <td>{{ exchange.attempts }}</td>
+          <td>{{ exchange.last_error or exchange.tally_reference or '-' }}</td>
+          <td>{{ exchange.updated_at.strftime('%d %b %Y %H:%M') }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="empty">No local events queued yet</td></tr>
+        <tr><td colspan="6" class="empty">No SFTP exchange has run yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -168,6 +169,25 @@ class MasterOutboxStatus(str, Enum):
 class MasterInboxStatus(str, Enum):
     RECEIVED = "RECEIVED"
     APPLIED = "APPLIED"
+    FAILED = "FAILED"
+
+
+class ReceiptStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    DENIED = "DENIED"
+
+
+class TallySftpDirection(str, Enum):
+    UPLOAD = "UPLOAD"
+    DOWNLOAD = "DOWNLOAD"
+
+
+class TallySftpStatus(str, Enum):
+    PENDING = "PENDING"
+    UPLOADED = "UPLOADED"
+    IMPORTED = "IMPORTED"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
     FAILED = "FAILED"
 
 
@@ -641,6 +661,64 @@ class MasterInboxCommand(Base):
     @property
     def payload(self) -> dict:
         return json.loads(self.payload_json)
+
+
+class Receipt(Base):
+    """Payment proof captured locally and reviewed by Setuora Master."""
+
+    __tablename__ = "receipts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    receipt_uuid: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=lambda: str(uuid4()))
+    receipt_date: Mapped[date] = mapped_column(Date, index=True)
+    proof_image: Mapped[bytes] = mapped_column(LargeBinary)
+    proof_content_type: Mapped[str] = mapped_column(String(40))
+    utr_number: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default=ReceiptStatus.PENDING.value, index=True)
+    rejection_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    created_by: Mapped[User | None] = relationship()
+
+
+class TallySftpExchange(Base):
+    """Durable franchise-side audit record for one SFTP XML exchange."""
+
+    __tablename__ = "tally_sftp_exchanges"
+    __table_args__ = (
+        UniqueConstraint(
+            "direction",
+            "remote_filename",
+            name="uq_tally_sftp_exchange_remote_file",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    direction: Mapped[str] = mapped_column(String(16), index=True)
+    remote_filename: Mapped[str] = mapped_column(String(255))
+    file_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(
+        String(24),
+        default=TallySftpStatus.PENDING.value,
+        index=True,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    tally_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
 
 
 @sqlalchemy_event.listens_for(MasterOutboxEvent, "before_update")

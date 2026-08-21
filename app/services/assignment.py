@@ -216,7 +216,10 @@ def assign_barcodes_to_existing_stock(
         batch.submitted_at = batch.created_at
         from app.config import get_settings
 
-        if get_settings().app_mode == "lite":
+        if (
+            get_settings().app_mode == "lite"
+            and get_settings().master_sync_enabled
+        ):
             # QR generation remains a Lite-only operation.  Master receives
             # the resulting serial state through the durable event outbox.
             db.flush()

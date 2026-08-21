@@ -30,6 +30,8 @@ from app.models import (
     MasterInboxStatus,
     MasterOutboxEvent,
     MasterOutboxStatus,
+    Receipt,
+    ReceiptStatus,
     Serial,
     SerialStatus,
     utc_now,
@@ -1053,6 +1055,12 @@ def push_pending_events(
                 batch.status = BatchStatus.SYNCED.value
                 batch.synced_at = event.sent_at
                 batch.last_error = None
+        elif event.aggregate_type == "RECEIPT":
+            receipt = db.scalar(
+                select(Receipt).where(Receipt.receipt_uuid == event.aggregate_id)
+            )
+            if receipt is not None:
+                receipt.synced_at = event.sent_at
         db.commit()
         sent_count += 1
 
@@ -1118,11 +1126,14 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
             apply_transfer_available_command,
             apply_transfer_receipt_command,
         )
+        from app.services.receipts import apply_receipt_review_command
 
         if command_type in {"TRANSFER_AVAILABLE", "TRANSFER_INCOMING"}:
             apply_transfer_available_command(db, payload)
         elif command_type in {"TRANSFER_RECEIPT", "TRANSFER_RECEIPT_STATUS"}:
             apply_transfer_receipt_command(db, payload)
+        elif command_type == "RECEIPT_REVIEWED":
+            apply_receipt_review_command(db, payload)
         else:
             raise MasterSyncError(f"Unsupported Master command type: {command_type}.")
     except Exception as exc:

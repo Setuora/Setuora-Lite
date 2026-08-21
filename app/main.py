@@ -15,9 +15,9 @@ from app.middleware import CSRFOriginMiddleware, SecurityHeadersMiddleware, Sess
 from app.routers import account, auth
 from app.services.backup_worker import start_backup_worker, stop_backup_worker
 from app.services.bootstrap import bootstrap
-from app.services.master_sync_worker import (
-    start_master_sync_worker,
-    stop_master_sync_worker,
+from app.services.sftp_tally_sync_worker import (
+    start_sftp_tally_sync_worker,
+    stop_sftp_tally_sync_worker,
 )
 from app.services.schema import ensure_runtime_schema
 from app.services.sync_worker import start_retry_worker, stop_retry_worker
@@ -29,8 +29,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise RuntimeError(
             "APP_SECRET_KEY is insecure. Set it to a long random string before startup."
         )
-    if app.state.app_mode == "lite" and settings.master_sync_configuration_error:
-        raise RuntimeError(settings.master_sync_configuration_error)
+    if app.state.app_mode == "lite" and settings.sftp_sync_configuration_error:
+        raise RuntimeError(settings.sftp_sync_configuration_error)
     Base.metadata.create_all(bind=engine)
     ensure_runtime_schema()
     with SessionLocal() as db:
@@ -38,7 +38,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if app.state.app_mode == "legacy":
         start_retry_worker(app)
     elif app.state.app_mode == "lite":
-        start_master_sync_worker(app)
+        start_retry_worker(app)
+        start_sftp_tally_sync_worker(app)
     start_backup_worker(app)
     try:
         yield
@@ -46,7 +47,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if app.state.app_mode == "legacy":
             await stop_retry_worker(app)
         elif app.state.app_mode == "lite":
-            await stop_master_sync_worker(app)
+            await stop_sftp_tally_sync_worker(app)
+            await stop_retry_worker(app)
         await stop_backup_worker(app)
 
 
@@ -106,10 +108,18 @@ def create_app(app_mode: str | None = None) -> FastAPI:
     app.include_router(users.router)
     app.include_router(warehouse.router)
     if selected_mode == "lite":
-        from app.routers import lite_sync, role_access, transfers
+        from app.routers import (
+            lite_sync,
+            receipts,
+            settings,
+            tally_check,
+            transfers,
+        )
 
         app.include_router(lite_sync.router)
-        app.include_router(role_access.router)
+        app.include_router(receipts.router)
+        app.include_router(settings.router)
+        app.include_router(tally_check.router)
         app.include_router(transfers.router)
     else:
         from app.routers import settings, tally_check

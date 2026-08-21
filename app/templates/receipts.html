@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Receipts - Setuora Lite{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Payment proof</p>
+    <h1>Receipts</h1>
+    <p>Upload payment proof for approval by Setuora Master.</p>
+  </div>
+</section>
+
+{% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<section class="panel">
+  <h2>New receipt</h2>
+  <form method="post" action="/receipts" enctype="multipart/form-data" class="grid-form compact">
+    <label>Date<input type="date" name="receipt_date" value="{{ today }}" required></label>
+    <label>UTR number <span class="muted">(optional)</span><input type="text" name="utr_number" maxlength="80" autocomplete="off"></label>
+    <label class="span-all">Proof image<input type="file" name="proof" accept="image/jpeg,image/png,image/webp" capture="environment" required><small>JPEG, PNG, or WebP; maximum 3 MB.</small></label>
+    <div class="form-actions span-all"><button class="button primary" type="submit">Submit receipt</button></div>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Date</th><th>Proof</th><th>UTR number</th><th>Status</th><th>Master response</th><th>Submitted</th></tr></thead>
+      <tbody>
+        {% for receipt in receipts %}
+        <tr>
+          <td>{{ receipt.receipt_date.strftime('%d %b %Y') }}</td>
+          <td><a class="button small" href="/receipts/{{ receipt.id }}/proof" target="_blank" rel="noopener">View image</a></td>
+          <td>{{ receipt.utr_number or '-' }}</td>
+          <td><span class="status {{ receipt.status|lower }}">{{ receipt.status|title }}</span><small>{{ 'Synced to Master' if receipt.synced_at else 'Waiting to sync' }}</small></td>
+          <td>{% if receipt.rejection_remarks %}{{ receipt.rejection_remarks }}{% elif receipt.status == 'APPROVED' %}Approved by {{ receipt.reviewed_by or 'Master' }}{% else %}-{% endif %}</td>
+          <td>{{ receipt.created_at.strftime('%d %b %Y %H:%M') }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty">No receipts submitted yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

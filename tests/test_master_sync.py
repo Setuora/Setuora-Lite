@@ -459,7 +459,7 @@ def test_franchise_admin_can_save_master_connection_settings(
     response = lite_sync_router.update_master_connection_settings(
         _request(user.id, "/master-connection/settings", app_mode="lite"),
         franchise_code="blr-01",
-        master_url="https://setuora-master.example.ts.net/",
+        master_url="https://setuora-master.example.com/",
         master_api_key="setuora-node.new." + "n" * 32,
         master_sync_enabled="true",
         master_sync_interval_seconds="45",
@@ -476,7 +476,7 @@ def test_franchise_admin_can_save_master_connection_settings(
             "MASTER_SYNC_ENABLED": "true",
             "MASTER_SYNC_INTERVAL_SECONDS": "45",
             "MASTER_TLS_VERIFY": "true",
-            "MASTER_URL": "https://setuora-master.example.ts.net",
+            "MASTER_URL": "https://setuora-master.example.com",
         }
     ]
 
@@ -504,7 +504,7 @@ def test_blank_connection_credential_preserves_stored_secret(
     response = lite_sync_router.update_master_connection_settings(
         _request(user.id, "/master-connection/settings", app_mode="lite"),
         franchise_code="BLR-01",
-        master_url="https://setuora-master.example.ts.net",
+        master_url="https://setuora-master.example.com",
         master_api_key="",
         master_sync_enabled=None,
         master_sync_interval_seconds="30",
@@ -534,7 +534,7 @@ def test_non_admin_cannot_save_master_connection_settings(
         lite_sync_router.update_master_connection_settings(
             _request(user.id, "/master-connection/settings", app_mode="lite"),
             franchise_code="BLR-01",
-            master_url="https://setuora-master.example.ts.net",
+            master_url="https://setuora-master.example.com",
             master_api_key="setuora-node.new." + "n" * 32,
             master_sync_enabled="true",
             master_sync_interval_seconds="30",
@@ -578,7 +578,7 @@ def test_franchise_code_cannot_change_after_outbox_event_exists(
     response = lite_sync_router.update_master_connection_settings(
         _request(user.id, "/master-connection/settings", app_mode="lite"),
         franchise_code="OTHER-01",
-        master_url="https://setuora-master.example.ts.net",
+        master_url="https://setuora-master.example.com",
         master_api_key="",
         master_sync_enabled="true",
         master_sync_interval_seconds="30",
@@ -651,6 +651,7 @@ def test_oversized_batch_submission_rolls_back_stock_and_outbox(
 ):
     settings = _settings()
     monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
+    monkeypatch.setattr(batches_router, "get_settings", lambda: settings)
     _initialize_empty_node(db_session)
     user, _product_row, serial, batch = _sale_batch(
         db_session,
@@ -1413,25 +1414,16 @@ def test_initial_inventory_snapshot_must_be_the_first_outbox_event(
         master_sync.enqueue_initial_inventory_snapshot(db_session, actor=user)
 
 
-@pytest.mark.parametrize(
-    ("franchise_code", "master_sync_enabled", "error_pattern"),
-    [
-        ("", False, "FRANCHISE_CODE"),
-        ("CUTOVER-01", False, "Initialize inventory"),
-    ],
-)
-def test_lite_submit_fails_closed_before_initialization_and_rolls_back_stock(
+def test_lite_submit_uses_local_tally_without_node_initialization(
     db_session,
     monkeypatch,
-    franchise_code,
-    master_sync_enabled,
-    error_pattern,
 ):
-    settings = _settings(
-        franchise_code=franchise_code,
-        master_sync_enabled=master_sync_enabled,
+    queue_calls: list[str] = []
+    monkeypatch.setattr(
+        batches_router,
+        "queue_batch_for_sync",
+        lambda _db, batch: queue_calls.append(batch.batch_number),
     )
-    monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
     user, _product_row, serial, batch = _sale_batch(
         db_session,
         code="CUTOVER-PROD",
@@ -1447,12 +1439,12 @@ def test_lite_submit_fails_closed_before_initialization_and_rolls_back_stock(
         db_session,
     )
 
-    assert response.status_code == 400
-    assert error_pattern.encode() in response.body
+    assert response.status_code == 303
+    assert queue_calls == [batch.batch_number]
     db_session.refresh(batch)
     db_session.refresh(serial)
-    assert batch.status == BatchStatus.DRAFT.value
-    assert serial.status == SerialStatus.IN_STOCK.value
+    assert batch.status == BatchStatus.SUBMITTED.value
+    assert serial.status == SerialStatus.SOLD.value
     assert db_session.scalar(select(func.count(MasterOutboxEvent.id))) == 0
 
 
@@ -1502,7 +1494,7 @@ def test_permanent_franchise_code_change_blocks_enqueue_and_transport(
     assert db_session.scalar(select(func.count(MasterOutboxEvent.id))) == 2
 
 
-def test_submit_route_queues_direct_tally_only_in_legacy_mode(
+def test_submit_route_queues_direct_tally_in_lite_and_legacy_modes(
     db_session,
     monkeypatch,
 ):
@@ -1525,9 +1517,6 @@ def test_submit_route_queues_direct_tally_only_in_legacy_mode(
     assert response.status_code == 303
     assert queue_calls == [legacy_batch.batch_number]
 
-    lite_settings = _settings(app_mode="lite")
-    monkeypatch.setattr(master_sync, "get_settings", lambda: lite_settings)
-    _initialize_empty_node(db_session)
     lite_user, _product, _serial, lite_batch = _sale_batch(
         db_session,
         code="LITE-PROD",
@@ -1543,12 +1532,12 @@ def test_submit_route_queues_direct_tally_only_in_legacy_mode(
     )
 
     assert response.status_code == 303
-    assert queue_calls == [legacy_batch.batch_number]
+    assert queue_calls == [legacy_batch.batch_number, lite_batch.batch_number]
     db_session.refresh(lite_batch)
-    assert lite_batch.status == BatchStatus.PENDING_SYNC.value
+    assert lite_batch.status == BatchStatus.SUBMITTED.value
     event = db_session.scalar(
         select(MasterOutboxEvent).where(
             MasterOutboxEvent.aggregate_id.like(f"%:{lite_batch.batch_number}")
         )
     )
-    assert event is not None
+    assert event is None

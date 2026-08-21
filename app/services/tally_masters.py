@@ -240,6 +240,45 @@ def build_ledger_list_xml(company_name: str) -> str:
     return ET.tostring(envelope, encoding="unicode")
 
 
+def build_party_export_xml(company_name: str) -> str:
+    """Build the read-only Tally export used by the Master SFTP exchange."""
+
+    clean_company = company_name.strip()
+    if not clean_company:
+        raise TallyDataError("Choose a Tally company before synchronizing parties.")
+    envelope, tdl_message = _build_collection_export(
+        "Setuora Debtors and Creditors",
+        "Ledger",
+        (
+            "Name",
+            "Parent",
+            "OpeningBalance",
+            "ClosingBalance",
+            "MailingName",
+            "Address",
+            "Pincode",
+            "CountryName",
+            "LedStateName",
+            "Email",
+            "LedgerPhone",
+            "LedgerMobile",
+            "PartyGSTIN",
+        ),
+        company_name=clean_company,
+    )
+    collection = next(node for node in tdl_message if _local_tag(node) == "COLLECTION")
+    ET.SubElement(collection, "FILTER").text = "SetuoraPartyLedgerFilter"
+    formula = ET.SubElement(
+        tdl_message,
+        "SYSTEM",
+        {"TYPE": "Formulae", "NAME": "SetuoraPartyLedgerFilter"},
+    )
+    formula.text = (
+        '$Parent = "Sundry Debtors" OR $Parent = "Sundry Creditors"'
+    )
+    return ET.tostring(envelope, encoding="unicode")
+
+
 def build_stock_location_list_xml(company_name: str) -> str:
     envelope, _ = _build_collection_export(
         "Setuora Stock Location List",
@@ -414,6 +453,25 @@ def fetch_tally_ledgers(settings: dict[str, str], company_name: str) -> list[Tal
         )
         seen.add(name.casefold())
     return sorted(ledgers, key=lambda ledger: ledger.name.casefold())
+
+
+def export_tally_parties_xml(settings: dict[str, str], company_name: str) -> bytes:
+    """Export a validated debtor/creditor XML document from local Tally."""
+
+    body, root = _post_read_request(
+        settings,
+        build_party_export_xml(company_name),
+    )
+    supported_parents = {"sundry debtors", "sundry creditors"}
+    if not any(
+        _local_tag(node) == "LEDGER"
+        and _direct_text(node, "PARENT").casefold() in supported_parents
+        for node in root.iter()
+    ):
+        raise TallyDataError(
+            "Tally returned no ledgers under Sundry Debtors or Sundry Creditors."
+        )
+    return body.encode("utf-8")
 
 
 def fetch_tally_stock_locations(

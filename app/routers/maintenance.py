@@ -23,9 +23,9 @@ from app.services.backup import (
 )
 from app.services.backup_worker import start_backup_worker, stop_backup_worker
 from app.services.database_reset import reset_database_and_cache
-from app.services.master_sync_worker import (
-    start_master_sync_worker,
-    stop_master_sync_worker,
+from app.services.sftp_tally_sync_worker import (
+    start_sftp_tally_sync_worker as start_master_sync_worker,
+    stop_sftp_tally_sync_worker as stop_master_sync_worker,
 )
 from app.services.sync_worker import start_retry_worker, stop_retry_worker
 from app.templates import templates
@@ -39,14 +39,17 @@ def _deny_connected_lite_destructive_maintenance(request: Request) -> None:
     settings = get_settings()
     if (
         request.app.state.app_mode == "lite"
-        and settings.master_sync_enabled
+        and (
+            getattr(settings, "sftp_sync_enabled", False)
+            or getattr(settings, "master_sync_enabled", False)
+        )
     ):
         raise HTTPException(
             status_code=409,
             detail=(
-                "Reset and restore are disabled on a connected Lite node until "
-                "Master cursor reconciliation and inventory re-enrollment are "
-                "implemented."
+                "Reset and restore are disabled while Lite synchronization is "
+                "enabled. Disable sync and preserve both the database and SFTP "
+                "exchange state before recovery."
             ),
         )
 
@@ -249,6 +252,7 @@ async def _restore_from_path(request: Request, db: Session, backup_path: Path):
 async def _stop_maintenance_workers(request: Request) -> None:
     if request.app.state.app_mode == "lite":
         await stop_master_sync_worker(request.app)
+        await stop_retry_worker(request.app)
     else:
         await stop_retry_worker(request.app)
     await stop_backup_worker(request.app)
@@ -257,6 +261,7 @@ async def _stop_maintenance_workers(request: Request) -> None:
 def _start_maintenance_workers(request: Request) -> None:
     if request.app.state.app_mode == "lite":
         start_master_sync_worker(request.app)
+        start_retry_worker(request.app)
     else:
         start_retry_worker(request.app)
     start_backup_worker(request.app)

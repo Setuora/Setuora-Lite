@@ -356,7 +356,11 @@ def relocate_stock(
             relocations.append(relocation)
         from app.config import get_settings
 
-        if get_settings().app_mode == "lite" and moved_serials:
+        if (
+            get_settings().app_mode == "lite"
+            and get_settings().master_sync_enabled
+            and moved_serials
+        ):
             db.flush()
             from app.services.master_sync import enqueue_outbox_event, network_event_item
 

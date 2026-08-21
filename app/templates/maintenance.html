@@ -68,7 +68,7 @@
   </form>
 </section>
 
-{% if not (app_mode == 'lite' and backup_config.master_sync_enabled) %}
+{% if not (app_mode == 'lite' and (backup_config.sftp_sync_enabled or backup_config.master_sync_enabled)) %}
 <section class="panel">
   <div class="section-title"><h2>Import backup</h2></div>
   <div class="backup-import-grid">
@@ -142,19 +142,19 @@
 <section class="panel">
   <div class="section-title"><h2>Protected node recovery</h2></div>
   <p>
-    Database reset and restore are disabled while this Lite node is connected
-    to Setuora Master. Rewinding this database would invalidate its ordered
-    event cursor and Master stock ownership.
+    Database reset and restore are disabled while this Lite server is connected
+    to the Master SFTP exchange. Restoring an older database could forget an
+    XML file that Tally already imported or acknowledged.
   </p>
   <p class="muted">
-    Keep verified backups, but use a reviewed recovery procedure with Master
-    cursor reconciliation and inventory re-enrollment.
+    Keep verified backups, then disable synchronization and preserve both the
+    database and SFTP exchange history before performing a reviewed recovery.
   </p>
 </section>
 {% endif %}
 {% endif %}
 
-{% if not (app_mode == 'lite' and backup_config.master_sync_enabled) %}
+{% if not (app_mode == 'lite' and (backup_config.sftp_sync_enabled or backup_config.master_sync_enabled)) %}
 <section class="panel">
   <div class="section-title"><h2>Restore procedure</h2></div>
   <div class="checklist">

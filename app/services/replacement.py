@@ -125,7 +125,10 @@ def replace_barcode_serial(db: Session, user: User, old_serial_number: str, new_
     try:
         from app.config import get_settings
 
-        if get_settings().app_mode == "lite":
+        if (
+            get_settings().app_mode == "lite"
+            and get_settings().master_sync_enabled
+        ):
             # Master must learn both halves atomically: the retired QR is no
             # longer stock, and its replacement represents the same unit.
             db.flush()
