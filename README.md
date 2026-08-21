@@ -1,132 +1,165 @@
-# Setuora Lite — Franchise Operations Node
+# Setuora Lite
 
-`Setuora-Lite` runs inside a franchise LAN and owns the operational workflows:
-purchase, sale, return, issue, audit, QR generation/printing, and local inventory
-history. It is designed to continue local capture during an Internet outage.
+> Offline-capable franchise operations node synchronized with Setuora Master.
 
-Lite connects to Setuora Master using outbound HTTPS only. It
-uploads durable, idempotent events, polls Master for commands and incoming
-transfers, and never requires an inbound WAN firewall rule. Master—not Lite—owns
-consolidated monitoring and the central Tally queue.
+## Overview
 
-> **Rollout status — self-hosted Lite/Master pilot implemented; operational
-> acceptance pending.** Lite mode has an ordered durable outbox, idempotent
-> command inbox, outbound sync worker, franchise-namespaced QR generation, and
-> partial/full inter-franchise transfers. The supported deployment adds
-> LAN-only Caddy HTTPS and an outbound-only Tailscale identity. Direct Tally
-> routes and the Tally retry worker are excluded from Lite. Existing-data
-> cutover, cursor recovery, credential drills, and two-node outage/restore/soak
-> tests remain rollout gates.
+Setuora Lite runs inside a franchise LAN and owns local purchase, sale, return,
+issue, audit, QR, transfer, and inventory-history workflows. It continues to
+capture operations when Internet or Master connectivity is unavailable.
 
-See [Lite Node Synchronization](docs/architecture/lite-node-sync.md) and the
-normative
-[Node Sync API v1](../Setuora-Master/docs/api/node-sync-v1.md).
+Lite connects to Setuora Master using outbound HTTPS only. It uploads durable,
+idempotent events and polls for commands and incoming transfers; it does not
+require an inbound WAN firewall rule or a direct Tally connection.
 
-## Current Local Foundation
+## Status
 
-- Role-based login for admin, purchase, sales, and audit users
-- Product master with HSN, GST, unit, default rate, sales discount, and exact Tally stock item name
-- Bulk serial generation and printable/PDF QR labels with the serial number only
-- Product batch, manufacturing date, expiry date, and warehouse tracking for assigned stock
-- Purchase, sale, audit, sales return, purchase return, stock issue, barcode assignment, and barcode replacement workflows
-- Atomic local inventory plus durable Master-outbox commit for submitted batches
-- Strict oldest-first event replay with immutable UUID, sequence, payload, and SHA-256
-- Fail-closed 5,000-item/5 MiB frozen-body limits with byte-aware initial
-  baseline chunking
-- Durable idempotent Master-command inbox and outbound command polling/ACK
-- Franchise-code namespacing for newly generated QR values in Lite mode
-- Source dispatch locking and destination manifest scan with partial/full receipt
-- Batch pricing, GST split, round off, and voucher preview before submit
-- FEFO picking and expiry control for sale, issue, and purchase-return batches
-- Inherited direct Tally XML, readiness, discovery, profile, and retry paths;
-  these require an explicit test-only legacy gate and are not registered in Lite
-- Editable admin role access controls for pages, actions, and data areas
-- Audit reconciliation for verified, missing, and extra serials
-- Dashboard counts, charts, recent activity, and live refresh
-- Configurable stock movement, stock-cover, slow/dead stock, overstock, and expiry-risk analysis with warehouse/franchise filters
-- Excel reports, transaction history, scan history, and PDF audit reports
-- SQLite-safe backup download and restore procedure
-  (connected Lite nodes deliberately block browser reset/restore until cursor
-  reconciliation exists)
+The self-hosted Lite/Master pilot is implemented and awaiting operational
+acceptance. Remaining rollout gates include existing-data cutover, cursor and
+credential recovery drills, stronger sync-health validation, and two-node
+outage, restore, and soak testing.
 
-The Master connection page provides a required one-time initialization event:
-an active `GENERATED`/`IN_STOCK` snapshot for an existing-data site or an empty
-heartbeat for a greenfield site. Ordinary events are fail-closed until that
-marker exists for the permanent franchise code. Historical sold/issued
-migration, destination directory/cancel recovery, automated cursor
-reconciliation after restore, stronger sync-health alerts, durable worker
-leases, and two-node failure/soak testing remain rollout work. The current
-worker and SQLite database are a single-process MVP.
+The current worker and SQLite database are a single-process MVP. Connected
+browser reset and restore remain blocked until cursor reconciliation is
+available.
 
-## Folder Structure
+## Features
+
+- Role-based local operations for administration, purchase, sales, and audit
+- Product, batch, warehouse, manufacturing, expiry, and serial tracking
+- Purchase, sale, audit, return, issue, barcode assignment, and replacement
+- Bulk QR generation with franchise-code namespacing
+- FEFO picking, expiry controls, GST, round-off, and voucher previews
+- Atomic local inventory changes with a durable ordered Master outbox
+- Immutable event UUIDs, sequence numbers, payloads, and SHA-256 hashes
+- Idempotent Master command inbox with polling and acknowledgement
+- Partial and full inter-franchise transfer dispatch and receipt
+- Dashboard analysis, reports, Excel exports, and audit PDFs
+- Verified automatic SQLite backups
+- LAN-only Caddy HTTPS and outbound-only Tailscale identity
+
+## Architecture
+
+```text
+Staff phone or workstation
+  -> franchise LAN HTTPS
+  -> Caddy
+  -> Setuora Lite / SQLite / durable outbox
+  -> Docker-internal HTTP CONNECT proxy
+  -> Tailscale (tag:setuora-lite)
+  -> private Setuora Master HTTPS endpoint
+  -> central Tally queue and reconciliation
+```
+
+Lite has no Tailscale Serve or Funnel listener. Local services start without
+Master or Tailscale availability, and the outbox resumes oldest-first delivery
+when connectivity returns.
+
+Lite never connects directly to Tally or opens port 9000. A Master event
+acknowledgement confirms durable receipt by Master; it does not mean that Tally
+posting succeeded.
+
+## Repository Structure
 
 ```text
 Setuora-Lite/
-|-- compose.yaml                      Lite, Caddy, and Tailscale services
-|-- Dockerfile                        Non-root Lite runtime image
-|-- deploy.py                         Linux/Windows deployment lifecycle
-|-- requirements-runtime.lock         Hash-verified container dependencies
-|-- client/                           Packaged Linux/Windows lifecycle launchers
-|-- scripts/build_client_packages.py  Single-file installer builder
-|-- app/                              FastAPI application
-|   |-- main.py                       App entrypoint and route registration
-|   |-- models.py                     SQLAlchemy database models
-|   |-- routers/                      Page and API route handlers
-|   |-- services/                     Business logic and integrations
-|   |-- static/                       Browser JavaScript, CSS, and assets
-|   `-- templates/                    Jinja HTML templates
-|-- deployment/caddy/Caddyfile.container  LAN HTTPS reverse proxy
-|-- docs/                             Architecture and operating guides
-|-- tests/                            Pytest coverage
-`-- data/                             Local-development data, ignored by git
+|-- app/                         FastAPI application
+|   |-- routers/                Page and API route handlers
+|   |-- services/               Business logic and synchronization
+|   |-- static/                 Browser assets
+|   `-- templates/              Jinja templates
+|-- client/                     Linux and Windows lifecycle launchers
+|-- deployment/caddy/           LAN HTTPS reverse-proxy configuration
+|-- docs/                       Architecture and operating guides
+|-- scripts/                    Client package builder and support scripts
+|-- tests/                      Pytest coverage
+|-- data/                       Local development data, ignored by Git
+|-- compose.yaml                Lite, Caddy, and Tailscale services
+|-- Dockerfile                  Non-root application image
+|-- deploy.py                   Deployment lifecycle entry point
+|-- requirements-runtime.lock   Hash-verified container dependency lock
+`-- .env.example                Configuration template
 ```
 
-## Supported Self-Hosted Deployment
+## Requirements
 
-The same deployment is supported on Linux and Windows:
+- Docker Engine with Compose v2, or Docker Desktop with Linux containers
+- A reserved private LAN address or reviewed local DNS name
+- Reliable UTC time and outbound Internet access for Tailscale
+- A one-off, non-ephemeral, pre-authorized key tagged `tag:setuora-lite`
+- The private Master URL issued during Master setup
+- A one-time `setuora-node.*` credential for the enrolled franchise code
 
-- Docker Engine with Compose v2, or Docker Desktop using Linux containers;
-- a reserved private LAN address or reviewed LAN DNS name;
-- reliable UTC time and outbound Internet access for Tailscale;
-- a one-off, non-ephemeral, pre-authorized Tailscale key tagged
-  `tag:setuora-lite`;
-- the private Master URL printed by Master setup;
-- the one-time `setuora-node.*` credential issued for this exact franchise.
+Tally is not a Lite prerequisite and its port 9000 must not be reachable from
+the Lite stack.
 
-Tally is not a Lite prerequisite and port 9000 must not be reachable from this
-stack.
+## Installation
 
-First enroll the franchise in Master with its permanent code. Then, from the
-Lite project root, run:
+Enroll the franchise in Master using its permanent code, then run from the Lite
+repository root:
 
 ```bash
 python deploy.py setup
 ```
 
-The helper validates Docker, creates and protects `.env`, prompts without
-putting secrets in shell history, starts Lite/Caddy/Tailscale, verifies the
-database-backed health endpoint and LAN HTTPS, persists the Tailscale identity,
-removes bootstrap secrets, and checks authenticated `GET /api/v1/node` through
-the Tailscale proxy. Setup fails if the Master credential belongs to a different
-franchise code.
+Setup validates Docker, creates and protects `.env`, enrolls the persistent
+Tailscale identity, starts Lite and Caddy, verifies health and LAN HTTPS, checks
+the authenticated Master endpoint, and removes bootstrap secrets. Setup fails
+if the node credential belongs to a different franchise.
 
-The supported topology is:
+For client-ready Linux and Windows packages:
 
-```text
-Staff browser
-  -> franchise LAN HTTPS
-  -> Caddy
-  -> Setuora Lite + SQLite/outbox
-  -> Docker-internal HTTP CONNECT proxy
-  -> Tailscale (tag:setuora-lite)
-  -> private Master *.ts.net:443
+```bash
+python scripts/build_client_packages.py --version 1.0.0
 ```
 
-Lite has no Tailscale Serve/Funnel listener. Tailscale and Master may be offline
-while Lite and Caddy start and serve LAN operations; synchronization retries
-from the durable outbox when connectivity returns.
+Distribute the generated ZIP for the target platform from `dist/`, not a
+repository shortcut. See the [client package guide](docs/deployment/client-packages.md).
 
-Daily commands:
+## Configuration
+
+Supported setup writes `.env` interactively. Important settings include:
+
+- application secret, bootstrap administrator, database, and session controls
+- `FRANCHISE_CODE`, which must be permanent and unique before label generation
+- LAN bind address, hostname, and Caddy ports
+- Tailscale enrollment key, hostname, and `tag:setuora-lite`
+- private `MASTER_URL`, node API key, TLS verification, and sync intervals
+- backup schedule, retention, and optional off-machine directory
+
+Do not enter production secrets on a shared command line or commit `.env`.
+
+An existing site must send a one-time initialization event before ordinary
+events: either an active `GENERATED`/`IN_STOCK` snapshot or an empty greenfield
+heartbeat. Never let an ordinary event precede this marker for the permanent
+franchise code.
+
+## Usage
+
+First administration:
+
+1. Sign in with the administrator account created during setup.
+2. Confirm **Master connection** shows the initialization event and no blocked
+   oldest event.
+3. Confirm the franchise cursor and initial inventory in Master.
+4. Create complete product masters and named least-privilege users.
+5. Complete the release checklist before ordinary transactions.
+
+Typical inventory flow:
+
+1. Open **Batches** and choose Purchase, Sale, Audit, Return, or Issue.
+2. Enter the counterparty, location, or reference.
+3. Scan serials or use FEFO picking where available.
+4. Review item state, pricing, GST, round-off, and voucher preview.
+5. Submit and review both local state and Master event state.
+
+Use **Barcodes > Assignment** to generate labels from product quantities or an
+Excel upload. Use **Barcodes > Replacement** to retire a damaged serial and
+print a replacement.
+
+## Operations
+
+Routine lifecycle commands:
 
 ```bash
 python deploy.py status
@@ -139,69 +172,21 @@ python deploy.py start
 python deploy.py export-ca
 ```
 
-`stop` preserves all application, Tailscale, and Caddy volumes. Never use
+`stop` preserves the application, Tailscale, and Caddy volumes. Never use
 `docker compose down --volumes` during normal operation.
 
-Install the public CA file exported by `setup`/`export-ca` on each approved
-staff phone or workstation before opening the printed LAN HTTPS URL. Keep the
-Caddy data volume private; only the exported public root is distributed.
+Install the exported public Caddy root certificate on each approved LAN device.
+Keep the private Caddy data volume protected. Automatic verified backups run
+every 24 hours and retain the newest 14 by default; copy reviewed backups and a
+protected copy of `.env` off the host.
 
-### Shareable Linux and Windows Installers
+Restoring a connected node requires comparison with Master's cursor and
+reconciliation of inventory and transfers. Follow the backup guide before
+replacing the database.
 
-Build client-ready, self-contained installers from a reviewed release:
+## Development
 
-```bash
-python scripts/build_client_packages.py --version 1.0.0
-```
-
-This creates client-ready Linux/Windows ZIPs, the underlying Linux `.run` and
-double-clickable Windows `.cmd`, and SHA-256 checksums in `dist/`. Each guided
-package installs missing Docker/Python prerequisites with operator approval,
-then installs or updates the complete Docker
-deployment without Git and excludes `.env`, credentials, databases, backups,
-exported certificates, and Docker volume state. See the
-[client package guide](docs/deployment/client-packages.md).
-
-The repository root shortcut `Linux — Setuora Lite.run` launches the newest
-matching package in `dist/`. From a fresh Linux or Windows clone, the platform
-shortcut installs a missing Python runtime, builds the package when `dist/` is
-empty, and launches the guided setup. Distribute the generated
-`Setuora-Lite-<version>-Windows.zip` or `Setuora-Lite-<version>-Linux.zip`, not
-the repository shortcuts.
-
-Fresh-clone setup on Windows:
-
-1. Clone or download the repository and open its root directory in Explorer.
-2. Double-click `Windows — Setuora Lite.cmd`.
-3. Approve prerequisite installation and administrator prompts.
-
-Fresh-clone setup on Linux:
-
-```bash
-git clone <repository-url> Setuora-Lite
-cd Setuora-Lite
-./"Linux — Setuora Lite.run"
-```
-
-Set `SETUORA_RELEASE_VERSION` before launching to override the default local
-build label, `pilot`.
-
-Like Setuora Master, the Windows package uses a PowerShell lifecycle launcher
-for the same `deploy.py` commands. It contains no executable installer and does
-not maintain a second deployment implementation.
-
-### Existing Local Database
-
-Setup refuses to silently ignore a legacy `data/*.db`. Stop the old service,
-create and retain a verified backup, and complete the reviewed active-inventory
-baseline/collision procedure before switching to the named Docker volume.
-Never allow the first ordinary event to precede the initialization marker.
-Connected restores also require Master cursor reconciliation; see the
-[backup and restore guide](docs/deployment/backup-restore-guide.md).
-
-### Local Development
-
-Python 3.11 development remains available:
+Python 3.11 local development remains available:
 
 ```bash
 python3.11 -m venv .venv
@@ -211,214 +196,52 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Use test-only legacy mode only for the inherited regression suite. Do not use
-it on a franchise deployment.
+Legacy direct-Tally mode exists only for inherited regression coverage. Do not
+enable it on a franchise deployment.
 
-### First Administration
+## Testing
 
-1. Sign in with the administrator account created during setup.
-2. Confirm `Master connection` shows the initialization event sent and no
-   blocked oldest event.
-3. In Master, confirm the franchise cursor and initial inventory/empty baseline.
-4. Create product masters with complete HSN, GST, unit, rate, and exact Tally
-   stock-item metadata for Master.
-5. Create named users and assign only the required role access.
-6. Complete the release checklist before ordinary transactions.
-
-## 8. Normal Workflow
-
-Purchase stock:
-
-1. Open `Batches` -> `Purchase`.
-2. Enter supplier/reference.
-3. Scan serials.
-4. Check the voucher preview.
-5. Submit the batch.
-
-Sell stock:
-
-1. Open `Batches` -> `Sale`.
-2. Enter customer/reference.
-3. Scan in-stock serials.
-4. Use `Pick FEFO` when selling by product and quantity, or scan the earliest-expiry serials manually.
-5. Check pricing, GST, round off, and final value.
-6. Submit the batch.
-
-Audit stock:
-
-1. Open `Batches` -> `Audit`.
-2. Enter location/reference.
-3. Scan physical stock.
-4. Submit the audit.
-5. Review verified, missing, and extra findings.
-
-Returns and issue:
-
-- `Sales return`: scan sold items returned by customer.
-- `Purchase return`: scan or FEFO-pick in-stock items returned to supplier.
-- `Issue`: scan or FEFO-pick in-stock items issued for sample, office use, damage, marketing, production, or other reasons.
-
-QR label assignment:
-
-1. Open `Barcodes` -> `Assignment`.
-2. Select an existing product and quantity, or upload an Excel file.
-3. Excel can use `Product Code` or `Product Name` with `Quantity`; optional columns include `HSN`, `GST`, `SGST`, `IGST`, `Batch`, `Mfg Date`, `Expiry Date`, and `Warehouse`. Tally invoice exports with `Description of Goods` and `Quantity` are also accepted.
-4. Download the generated Excel file and labels PDF.
-
-Barcode replacement:
-
-1. Open `Barcodes` -> `Replacement`.
-2. Enter the damaged/old serial.
-3. Leave new serial blank to auto-generate, or enter a new serial manually.
-4. Print the new label.
-
-## 9. Tally Boundary
-
-Lite never connects to Tally or opens port 9000. It sends complete, immutable
-transaction events to Master; Master owns company/Godown mapping, the durable
-Tally queue, retry, posting, and reconciliation. A Master event acknowledgement
-is not Tally success.
-
-The inherited direct-Tally composition is test-only migration code and cannot
-be enabled by the supported Compose deployment. See
-[Tally boundary](docs/deployment/tally-integration-guide.md).
-
-## 10. Reports And Exports
-
-Use `Reports` for:
-
-- Scan history
-- Transaction history
-- Pending sync
-- Excel export
-- Expiry summary context
-
-Use batch detail pages for:
-
-- local transaction and item detail
-- Master event state and retry context
-- Audit PDF export
-
-Use label pages for:
-
-- Browser print
-- QR label PDF download
-- Serial XLSX download
-
-Use `Expiry` for:
-
-- Expiring stock bands
-- Slow-moving expiry risk
-- Sleeping stock
-- Warehouse expiry exposure
-- Shortcuts to product batch entry and FEFO sale
-
-## 11. Backup And Restore
-
-Backup:
-
-1. Open `Maintenance`.
-2. Click `Download backup`.
-3. Store the downloaded `.db` file safely.
-4. Keep a separate copy of `.env`.
-
-Automatic verified backups run every 24 hours inside the persistent application
-volume, retain the newest 14, and pass SQLite integrity/foreign-key checks.
-Copy verified backups off-machine with reviewed volume/host backup tooling and
-keep a separate encrypted copy of `.env`.
-
-Browser import/reset is deliberately blocked on connected Lite. An older
-database can have an outbox cursor behind Master even when SQLite is healthy.
-Connected recovery must compare Master's cursor and reconcile inventory and
-transfers before operations resume. See the
-[backup and restore guide](docs/deployment/backup-restore-guide.md).
-
-## 12. Run Tests
-
-```bash
-pytest
-```
-
-Or:
+Run the test suite from an activated Python 3.11 environment:
 
 ```bash
 python -m pytest
 ```
 
-Expected result:
+All collected tests must pass before an update or release. Python 3.13 may fail
+before test collection with the current SQLAlchemy pin.
 
-```text
-All collected tests pass.
-```
+## Security
 
-The current pinned dependencies are verified with Python 3.11. A Python 3.13 virtual environment may fail before tests start with the current SQLAlchemy pin.
+- Allow LAN ports 80/443 only from approved private networks.
+- Keep Lite free of inbound WAN, Tailscale Serve, and Funnel listeners.
+- Keep Tally port 9000 unreachable from the Lite stack.
+- Protect `.env`, node credentials, databases, backups, and Caddy private state.
+- Preserve ordered delivery, idempotency, request-size limits, and the
+  initialization gate when changing synchronization.
+- Distribute only the exported public CA certificate, never Caddy private data.
 
-## 13. LAN Phone Camera Setup
+## Documentation
 
-Phone camera access requires HTTPS when opened from another LAN device. The
-Compose Caddy service provides it automatically:
-
-1. Reserve the configured `SETUORA_LAN_BIND_ADDRESS` on the franchise router or
-   server.
-2. Allow TCP 80/443 only from the approved private LAN.
-3. Run `python deploy.py export-ca`.
-4. Install the exported public root certificate on every approved phone and
-   workstation.
-
-Recommended production shape:
-
-```text
-Phone browser -> https://<franchise-LAN-host> -> Caddy -> Setuora container:8000
-```
-
-See [LAN HTTPS](docs/deployment/https-lan-guide.md). Back up the private
-`setuora-lite_caddy-data` volume, but distribute only the exported public root
-certificate.
-
-## 14. Automatic Startup
-
-Compose applies `restart: unless-stopped` to Lite, Caddy, and Tailscale. Configure
-Docker Engine/Desktop to start at host boot. Lite/Caddy do not wait for
-Tailscale health, so an offline reboot still brings the local UI back.
-
-## 15. Useful Deployment Docs
-
-- `docs/architecture/lite-node-sync.md`
-- `docs/architecture/adr-002-lite-self-hosted-tailscale-egress.md`
-- `../Setuora-Master/docs/api/node-sync-v1.md`
-- `../Setuora-Master/docs/architecture/adr-001-master-lite-control-plane.md`
-- `docs/deployment/installation-guide.md`
-- `docs/deployment/client-packages.md`
-- `docs/deployment/https-lan-guide.md`
-- `docs/deployment/user-manual.md`
-- `docs/deployment/backup-restore-guide.md`
-- `docs/deployment/tally-integration-guide.md`
+- [Lite synchronization architecture](docs/architecture/lite-node-sync.md)
+- [Self-hosted Tailscale egress ADR](docs/architecture/adr-002-lite-self-hosted-tailscale-egress.md)
+- [Installation guide](docs/deployment/installation-guide.md)
+- [Client packaging](docs/deployment/client-packages.md)
+- [LAN HTTPS](docs/deployment/https-lan-guide.md)
+- [User manual](docs/deployment/user-manual.md)
+- [Backup and restore](docs/deployment/backup-restore-guide.md)
+- [Tally boundary](docs/deployment/tally-integration-guide.md)
+- [Production release checklist](docs/deployment/production-release-checklist.md)
 
 ## Troubleshooting
 
-If login does not work:
-
-- Run `python deploy.py status` and `python deploy.py logs setuora`.
-- Confirm the browser uses the printed HTTPS LAN URL.
-- Check the bootstrap username/password.
-
-If camera does not open on phone:
-
-- Use Chrome or Edge.
-- Serve the app over HTTPS on the LAN.
-- Confirm the browser has camera permission.
-
-If Master synchronization is blocked:
-
-- Run `python deploy.py verify-sync`.
-- Confirm Tailscale is online and the Master URL is the private `*.ts.net` URL.
-- Confirm the node credential is active and belongs to this franchise code.
-- Open `Master connection` and inspect the oldest failed event; later events
-  intentionally remain blocked behind it.
-
-If the app fails to start:
-
-- Run `python deploy.py preflight`.
-- Confirm Docker Engine and Compose v2 are running.
-- Check that the configured LAN ports/address are available.
-- Run `python deploy.py logs setuora` and `python deploy.py logs caddy`.
+- **Login fails:** run `python deploy.py status`, inspect
+  `python deploy.py logs setuora`, and use the printed HTTPS LAN URL.
+- **Camera access fails:** use Chrome or Edge over LAN HTTPS, install the public
+  CA certificate, and grant browser camera permission.
+- **Master sync is blocked:** run `python deploy.py verify-sync`, confirm the
+  private Master URL and node credential, then inspect the oldest failed event.
+  Later events intentionally wait behind it.
+- **The application does not start:** run `python deploy.py preflight`, confirm
+  Docker and Compose v2 are running, and verify the configured address and ports.
+- **Recovery is required:** do not reset or import through the browser; follow
+  the connected-node reconciliation procedure in the backup guide.
