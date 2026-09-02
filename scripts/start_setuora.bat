@@ -11,7 +11,7 @@ if not exist "%DEPLOY_SCRIPT%" (
     endlocal & exit /b 1
 )
 
-call :find_python
+call "%SCRIPT_DIR%find_python.bat"
 if errorlevel 1 (
     echo Python 3.11 or newer was not found. Install it, then rerun this script.
     endlocal & exit /b 1
@@ -21,24 +21,3 @@ if errorlevel 1 (
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" echo Setuora start failed with exit code %EXIT_CODE%.
 endlocal & exit /b %EXIT_CODE%
-
-:find_python
-set "PYTHON_EXE="
-set "PYTHON_ARGS="
-py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=py"
-    set "PYTHON_ARGS=-3"
-    exit /b 0
-)
-python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=python"
-    exit /b 0
-)
-python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=python3"
-    exit /b 0
-)
-exit /b 1

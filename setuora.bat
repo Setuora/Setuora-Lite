@@ -7,6 +7,7 @@ set "SCRIPT_DIR=%ROOT_DIR%scripts\"
 set "CLI_MODE="
 set "ELEVATED_REENTRY="
 set "PAUSE_ON_ERROR="
+set "ELEVATED_LOG="
 
 if /I "%~2"=="--elevated" set "ELEVATED_REENTRY=1"
 if /I "%~3"=="--pause-on-error" set "PAUSE_ON_ERROR=1"
@@ -119,10 +120,35 @@ set "ELEVATED_CHILD_RAN=1"
 set "SETUORA_CONTROLLER=%~f0"
 set "SETUORA_ACTION=%~1"
 set "SETUORA_ELEVATED_PAUSE="
+set "SETUORA_ELEVATED_LOG="
 if not defined CLI_MODE set "SETUORA_ELEVATED_PAUSE=--pause-on-error"
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; try { $arguments = '/d /s /c ""' + $env:SETUORA_CONTROLLER + '" ' + $env:SETUORA_ACTION + ' --elevated ' + $env:SETUORA_ELEVATED_PAUSE + '"'; $process = Start-Process -FilePath $env:ComSpec -ArgumentList $arguments -Verb RunAs -Wait -PassThru; exit $process.ExitCode } catch { Write-Host 'Administrator approval was cancelled or could not be started.'; exit 1 }"
+if not defined CLI_MODE goto elevation_ready
+call :prepare_elevation_log
+if errorlevel 1 exit /b 1
+
+:elevation_ready
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; try { $arguments = '/d /v:off /s /c ""%%SETUORA_CONTROLLER%%" %%SETUORA_ACTION%% --elevated %%SETUORA_ELEVATED_PAUSE%%'; if ($env:SETUORA_ELEVATED_LOG) { $arguments += ' > "%%SETUORA_ELEVATED_LOG%%" 2>&1' }; $arguments += '"'; $process = Start-Process -FilePath $env:ComSpec -ArgumentList $arguments -Verb RunAs -Wait -PassThru; exit $process.ExitCode } catch { Write-Host 'Administrator approval was cancelled or could not be started.'; exit 1 }"
 set "ELEVATED_EXIT_CODE=%ERRORLEVEL%"
+if defined ELEVATED_LOG type "%ELEVATED_LOG%"
+if defined ELEVATED_LOG del /q "%ELEVATED_LOG%" >nul 2>&1
 exit /b %ELEVATED_EXIT_CODE%
+
+:prepare_elevation_log
+if not defined TEMP (
+    echo Windows temporary storage is unavailable; elevated output cannot be captured safely.
+    exit /b 1
+)
+:choose_elevation_log
+set "ELEVATED_LOG=%TEMP%\setuora-elevated-%RANDOM%-%RANDOM%.log"
+if exist "%ELEVATED_LOG%" goto choose_elevation_log
+type nul > "%ELEVATED_LOG%"
+if errorlevel 1 (
+    echo Could not create the temporary elevated-output log: "%ELEVATED_LOG%"
+    del /q "%ELEVATED_LOG%" >nul 2>&1
+    exit /b 1
+)
+set "SETUORA_ELEVATED_LOG=%ELEVATED_LOG%"
+exit /b 0
 
 :is_administrator
 powershell.exe -NoLogo -NoProfile -Command "$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 0 } else { exit 1 }" >nul 2>&1

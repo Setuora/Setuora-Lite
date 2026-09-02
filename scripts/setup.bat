@@ -19,13 +19,13 @@ if errorlevel 1 (
     endlocal & exit /b 1
 )
 
-call :find_python
+call "%SCRIPT_DIR%find_python.bat"
 if errorlevel 1 (
     call :install_python
     if errorlevel 1 (
         endlocal & exit /b 1
     )
-    call :find_python
+    call "%SCRIPT_DIR%find_python.bat"
     if errorlevel 1 (
         echo Python 3.11 was installed, but its executable could not be found in this process.
         echo Restart Windows, then run setuora.bat setup again. If the problem continues,
@@ -42,49 +42,6 @@ endlocal & exit /b %EXIT_CODE%
 :is_administrator
 powershell.exe -NoLogo -NoProfile -Command "$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 0 } else { exit 1 }" >nul 2>&1
 exit /b %ERRORLEVEL%
-
-:find_python
-set "PYTHON_EXE="
-set "PYTHON_ARGS="
-py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=py"
-    set "PYTHON_ARGS=-3.11"
-    exit /b 0
-)
-py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=py"
-    set "PYTHON_ARGS=-3"
-    exit /b 0
-)
-python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=python"
-    exit /b 0
-)
-python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_EXE=python3"
-    exit /b 0
-)
-for %%V in (314 313 312 311) do (
-    if exist "%ProgramFiles%\Python%%V\python.exe" (
-        "%ProgramFiles%\Python%%V\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-        if not errorlevel 1 (
-            set "PYTHON_EXE=%ProgramFiles%\Python%%V\python.exe"
-            exit /b 0
-        )
-    )
-    if exist "%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe" (
-        "%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-        if not errorlevel 1 (
-            set "PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe"
-            exit /b 0
-        )
-    )
-)
-exit /b 1
 
 :install_python
 where winget.exe >nul 2>&1

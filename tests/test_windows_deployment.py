@@ -60,6 +60,7 @@ def test_source_checkout_batch_controller_owns_waited_elevation():
     controller = (PROJECT_ROOT / "setuora.bat").read_text(encoding="utf-8")
     setup = (PROJECT_ROOT / "scripts" / "setup.bat").read_text(encoding="utf-8")
     update = (PROJECT_ROOT / "scripts" / "update.bat").read_text(encoding="utf-8")
+    finder = (PROJECT_ROOT / "scripts" / "find_python.bat").read_text(encoding="utf-8")
 
     assert 'set "ROOT_DIR=%~dp0"' in controller
     assert all(
@@ -76,13 +77,28 @@ def test_source_checkout_batch_controller_owns_waited_elevation():
     assert "if defined CLI_MODE goto cli_exit" in controller
     assert ":cli_exit\nendlocal & exit /b %EXIT_CODE%" in controller
     assert "pause\ngoto menu\n\n:cli_exit" in controller
+    assert "$env:SETUORA_CONTROLLER +" not in controller
+    assert '"%%SETUORA_CONTROLLER%%"' in controller
+    assert '"%%SETUORA_ELEVATED_LOG%%" 2>&1' in controller
+    assert "if not defined CLI_MODE goto elevation_ready\ncall :prepare_elevation_log" in controller
+    assert "%RANDOM%-%RANDOM%.log" in controller
+    assert 'type "%ELEVATED_LOG%"' in controller
+    assert 'del /q "%ELEVATED_LOG%"' in controller
+    assert controller.index('set "ELEVATED_EXIT_CODE=%ERRORLEVEL%"') < controller.index(
+        'type "%ELEVATED_LOG%"'
+    )
 
     assert "Start-Process" not in setup
     assert "requires Administrator privileges" in setup
     assert "Python.Python.3.11" in setup
-    assert "%ProgramFiles%\\Python%%V\\python.exe" in setup
-    assert "%LOCALAPPDATA%\\Programs\\Python\\Python%%V\\python.exe" in setup
     assert '"%DEPLOY_SCRIPT%" setup' in setup
+    assert "py -3.11" in finder
+    assert "%ProgramFiles%\\Python%%V\\python.exe" in finder
+    assert "%LOCALAPPDATA%\\Programs\\Python\\Python%%V\\python.exe" in finder
+    for script_name in ("setup.bat", "start_setuora.bat", "stop_setuora.bat", "update.bat"):
+        lifecycle = (PROJECT_ROOT / "scripts" / script_name).read_text(encoding="utf-8")
+        assert 'call "%SCRIPT_DIR%find_python.bat"' in lifecycle
+        assert ":find_python" not in lifecycle
 
     assert "status --porcelain --untracked-files=all" in update
     assert "merge-base --is-ancestor" in update
