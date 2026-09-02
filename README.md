@@ -75,8 +75,9 @@ After signing in:
 ### Windows source-checkout controls
 
 For a Windows source checkout used for development or direct server setup, run
-`setuora.bat` from the repository root (not the generated release installer).
-Run it without an argument for a menu, or use one of these commands:
+the root `setuora.bat` (not the generated release installer). Double-click it
+for a menu, or call it by path from any working directory with one of these
+commands:
 
 ```bat
 setuora.bat setup
@@ -86,9 +87,10 @@ setuora.bat update
 ```
 
 Run `setuora.bat setup` first; it requests Administrator approval and installs
-Python 3.11 with Windows Package Manager when needed. Run `setuora.bat update`
-elevated as well because it manages the native task lifecycle. These wrappers
-find the checkout's `deploy.py`; they are source-checkout/developer controls.
+Python 3.11 with Windows Package Manager when needed. Setup and update elevate
+automatically, wait for the Administrator operation to finish, and report its
+result in the original menu or shell. These wrappers find the checkout's
+`deploy.py`; they are source-checkout/developer controls.
 For a production packaged
 installation, continue to use the installer procedure above and its installed
 `setuora.ps1` lifecycle script.

@@ -54,3 +54,33 @@ def test_environment_writer_preserves_secret_characters(tmp_path, monkeypatch):
     deploy._write_env({"SFTP_PASSWORD": password})
     assert deploy._read_env()[1]["SFTP_PASSWORD"] == password
     assert "# keep" in env_path.read_text(encoding="utf-8")
+
+
+def test_source_checkout_batch_controller_owns_waited_elevation():
+    controller = (PROJECT_ROOT / "setuora.bat").read_text(encoding="utf-8")
+    setup = (PROJECT_ROOT / "scripts" / "setup.bat").read_text(encoding="utf-8")
+    update = (PROJECT_ROOT / "scripts" / "update.bat").read_text(encoding="utf-8")
+
+    assert 'set "ROOT_DIR=%~dp0"' in controller
+    assert all(
+        f'if /I "%~1"=="{command}"' in controller
+        for command in ("setup", "start", "stop", "update", "help")
+    )
+    assert "Setup / repair" in controller
+    assert "Invalid choice" in controller
+    assert "completed successfully" in controller
+    assert "-Verb RunAs -Wait -PassThru" in controller
+    assert "$process.ExitCode" in controller
+    assert "ELEVATED_REENTRY" in controller
+    assert "endlocal & exit /b %EXIT_CODE%" in controller
+
+    assert "Start-Process" not in setup
+    assert "requires Administrator privileges" in setup
+    assert "Python.Python.3.11" in setup
+    assert "%ProgramFiles%\\Python%%V\\python.exe" in setup
+    assert "%LOCALAPPDATA%\\Programs\\Python\\Python%%V\\python.exe" in setup
+    assert '"%DEPLOY_SCRIPT%" setup' in setup
+
+    assert "status --porcelain --untracked-files=all" in update
+    assert "merge-base --is-ancestor" in update
+    assert "merge --ff-only" in update
