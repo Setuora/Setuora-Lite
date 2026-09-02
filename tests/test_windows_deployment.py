@@ -72,7 +72,10 @@ def test_source_checkout_batch_controller_owns_waited_elevation():
     assert "-Verb RunAs -Wait -PassThru" in controller
     assert "$process.ExitCode" in controller
     assert "ELEVATED_REENTRY" in controller
-    assert "endlocal & exit /b %EXIT_CODE%" in controller
+    assert "if defined CLI_MODE endlocal & exit /b" not in controller
+    assert "if defined CLI_MODE goto cli_exit" in controller
+    assert ":cli_exit\nendlocal & exit /b %EXIT_CODE%" in controller
+    assert "pause\ngoto menu\n\n:cli_exit" in controller
 
     assert "Start-Process" not in setup
     assert "requires Administrator privileges" in setup

@@ -89,7 +89,7 @@ if defined PAUSE_ON_ERROR if not "%EXIT_CODE%"=="0" (
     echo.
     pause
 )
-if defined CLI_MODE endlocal & exit /b %EXIT_CODE%
+if defined CLI_MODE goto cli_exit
 echo.
 if "%EXIT_CODE%"=="0" (
     echo %DISPLAY_ACTION% completed successfully.
@@ -99,6 +99,9 @@ if "%EXIT_CODE%"=="0" (
 echo.
 pause
 goto menu
+
+:cli_exit
+endlocal & exit /b %EXIT_CODE%
 
 :run_elevated_if_needed
 set "ELEVATED_CHILD_RAN="
