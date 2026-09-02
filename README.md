@@ -85,11 +85,11 @@ setuora.bat stop
 setuora.bat update
 ```
 
-Run `setuora.bat setup` first, from an elevated Command Prompt or by
-right-clicking it and choosing **Run as administrator**. Run
-`setuora.bat update` elevated as well because it manages the native task
-lifecycle. These wrappers find the checkout's `deploy.py` and use Python
-3.11+; they are source-checkout/developer controls. For a production packaged
+Run `setuora.bat setup` first; it requests Administrator approval and installs
+Python 3.11 with Windows Package Manager when needed. Run `setuora.bat update`
+elevated as well because it manages the native task lifecycle. These wrappers
+find the checkout's `deploy.py`; they are source-checkout/developer controls.
+For a production packaged
 installation, continue to use the installer procedure above and its installed
 `setuora.ps1` lifecycle script.
 
