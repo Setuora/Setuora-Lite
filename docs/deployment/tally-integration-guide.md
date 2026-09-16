@@ -1,5 +1,7 @@
 # Tally and SFTP Integration
 
+> Historical franchise-Tally procedure. The current Lite has no Tally connection; see [central Tally topology](../architecture/central-tally-topology.md).
+
 Enable the Tally HTTP/XML gateway for the reviewed company, normally on
 `127.0.0.1:9000`. Setuora Lite requests a read-only ledger collection filtered
 to **Sundry Debtors** and **Sundry Creditors**.

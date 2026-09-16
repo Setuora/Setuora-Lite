@@ -8,11 +8,11 @@ holding an inventory transaction open.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
-from enum import Enum
 import hashlib
 import json
 import re
+from datetime import date, datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -31,12 +31,10 @@ from app.models import (
     MasterOutboxEvent,
     MasterOutboxStatus,
     Receipt,
-    ReceiptStatus,
     Serial,
     SerialStatus,
     utc_now,
 )
-
 
 EVENT_SCHEMA_VERSION = 1
 COMMAND_SCHEMA_VERSION = 1
@@ -92,7 +90,7 @@ def master_sync_enabled() -> bool:
 
 def normalize_franchise_code(value: Any) -> str:
     raw = str(value or "").strip().upper()
-    return re.sub(r"[^A-Z0-9]+", "-", raw).strip("-")
+    return re.sub(r"[^A-Z0-9_-]+", "-", raw).strip("-")
 
 
 def configured_franchise_code(*, required: bool | None = None) -> str:
@@ -102,8 +100,8 @@ def configured_franchise_code(*, required: bool | None = None) -> str:
         raise MasterSyncError(
             "Configure a unique FRANCHISE_CODE before enabling Setuora Master sync."
         )
-    if code and len(code) > 40:
-        raise MasterSyncError("FRANCHISE_CODE must be 40 characters or fewer.")
+    if code and len(code) > 20:
+        raise MasterSyncError("FRANCHISE_CODE must be 20 characters or fewer.")
     return code
 
 
@@ -122,11 +120,8 @@ def initial_inventory_is_queued(
     marker_id = db.scalar(
         select(MasterOutboxEvent.id)
         .where(
-            MasterOutboxEvent.aggregate_type
-            == INITIAL_INVENTORY_AGGREGATE_TYPE,
-            MasterOutboxEvent.aggregate_id.startswith(
-                _initial_inventory_reference_prefix(code)
-            ),
+            MasterOutboxEvent.aggregate_type == INITIAL_INVENTORY_AGGREGATE_TYPE,
+            MasterOutboxEvent.aggregate_id.startswith(_initial_inventory_reference_prefix(code)),
         )
         .limit(1)
     )
@@ -276,9 +271,7 @@ def enqueue_outbox_event(
     configured_franchise_code(required=True)
     if _initial_inventory:
         if normalized_aggregate_type != INITIAL_INVENTORY_AGGREGATE_TYPE:
-            raise MasterSyncError(
-                "Only an initial-inventory event may bypass Lite initialization."
-            )
+            raise MasterSyncError("Only an initial-inventory event may bypass Lite initialization.")
     else:
         require_initial_inventory_queued(db)
 
@@ -331,17 +324,12 @@ def enqueue_batch_submitted_event(
     # Master has no QR_ASSIGNMENT wire type; a completed assignment is the
     # initial authoritative stock snapshot for those newly activated QRs.
     network_event_type = (
-        "STOCK_SNAPSHOT"
-        if batch.batch_type == "QR_ASSIGNMENT"
-        else batch.batch_type
+        "STOCK_SNAPSHOT" if batch.batch_type == "QR_ASSIGNMENT" else batch.batch_type
     )
     payload = {
         "reference": batch.tally_reference or batch.batch_number,
         "actor": getattr(actor, "username", None),
-        "items": [
-            network_event_item(item.serial, rate=item.rate)
-            for item in items
-        ],
+        "items": [network_event_item(item.serial, rate=item.rate) for item in items],
         "party_name": batch.party_name,
         "party_state": batch.party_state,
         "party_gst_registration_type": batch.party_gst_registration_type,
@@ -369,10 +357,7 @@ enqueue_submitted_batch = enqueue_batch_submitted_event
 
 
 def _initial_inventory_reference(franchise_code: str, part_number: int) -> str:
-    return (
-        f"{franchise_code}:{INITIAL_INVENTORY_REFERENCE_SEGMENT}:"
-        f"PART-{part_number}"
-    )
+    return f"{franchise_code}:{INITIAL_INVENTORY_REFERENCE_SEGMENT}:PART-{part_number}"
 
 
 def _initial_inventory_payload(
@@ -443,8 +428,7 @@ def _partition_initial_inventory_items(
         item_addition = item_size + (1 if current_items else 0)
         candidate_fits = (
             len(current_items) + 1 <= MASTER_EVENT_MAX_ITEMS
-            and envelope_size + current_content_size + item_addition
-            <= MASTER_EVENT_MAX_BODY_BYTES
+            and envelope_size + current_content_size + item_addition <= MASTER_EVENT_MAX_BODY_BYTES
         )
         if not candidate_fits and current_items:
             chunks.append(current_items)
@@ -485,9 +469,7 @@ def enqueue_initial_inventory_snapshot(
     """Queue the one-time available-stock baseline before normal v1 events."""
 
     if db.scalar(select(MasterOutboxEvent.id).limit(1)) is not None:
-        raise MasterSyncError(
-            "Initial inventory can only be queued before the first outbox event."
-        )
+        raise MasterSyncError("Initial inventory can only be queued before the first outbox event.")
     franchise_code = configured_franchise_code(required=True)
     serials = db.scalars(
         select(Serial)
@@ -506,9 +488,7 @@ def enqueue_initial_inventory_snapshot(
     event_count = 0
     if not serials:
         event_count = 1
-        reference = (
-            f"{franchise_code}:{INITIAL_INVENTORY_REFERENCE_SEGMENT}:EMPTY"
-        )
+        reference = f"{franchise_code}:{INITIAL_INVENTORY_REFERENCE_SEGMENT}:EMPTY"
         enqueue_outbox_event(
             db,
             event_type="HEARTBEAT",
@@ -613,16 +593,8 @@ def _bounded_remote_value(
     if depth >= 2:
         return None
     if isinstance(value, dict):
-        ordered_keys = [
-            key for key in _REMOTE_DETAIL_PRIORITY if key in value
-        ]
-        ordered_keys.extend(
-            sorted(
-                str(key)
-                for key in value
-                if str(key) not in ordered_keys
-            )
-        )
+        ordered_keys = [key for key in _REMOTE_DETAIL_PRIORITY if key in value]
+        ordered_keys.extend(sorted(str(key) for key in value if str(key) not in ordered_keys))
         result: dict[str, Any] = {}
         for key in ordered_keys[:16]:
             bounded_key = _bounded_remote_text(
@@ -686,9 +658,7 @@ def _master_http_error_summary(
         if details is not None and details != {} and details != []:
             details_json = canonical_json(details)
             if len(details_json) > MASTER_ERROR_MAX_DETAILS_CHARS:
-                details_json = (
-                    details_json[:MASTER_ERROR_MAX_DETAILS_CHARS] + "..."
-                )
+                details_json = details_json[:MASTER_ERROR_MAX_DETAILS_CHARS] + "..."
             summary += f" Details: {details_json}"
     if api_key:
         summary = summary.replace(api_key, "[redacted]")
@@ -724,10 +694,7 @@ def _http_error_body(exc: HTTPError) -> bytes:
 
 def _http_status_is_retryable(status: int, *, error_code: str = "") -> bool:
     if status in {409, 412}:
-        return (
-            status == 409
-            and error_code.upper() in RETRYABLE_CONFLICT_ERROR_CODES
-        )
+        return status == 409 and error_code.upper() in RETRYABLE_CONFLICT_ERROR_CODES
     return (
         status in RETRYABLE_HTTP_STATUSES
         or status in RETRYABLE_CREDENTIAL_STATUSES
@@ -765,9 +732,7 @@ def _open_request(
             status = response.getcode()
         body = response.read(MASTER_RESPONSE_MAX_BODY_BYTES + 1)
         if len(body) > MASTER_RESPONSE_MAX_BODY_BYTES:
-            raise MasterSyncError(
-                "Setuora Master response exceeded the 5 MiB safety limit."
-            )
+            raise MasterSyncError("Setuora Master response exceeded the 5 MiB safety limit.")
         return int(status or 200), body
     finally:
         close = getattr(response, "close", None)
@@ -811,21 +776,15 @@ def verify_master_enrollment_identity(
     try:
         response = _decode_json_response(body)
     except MasterSyncError as exc:
-        raise MasterSyncError(
-            "Master returned a malformed GET /api/v1/node response."
-        ) from exc
+        raise MasterSyncError("Master returned a malformed GET /api/v1/node response.") from exc
     if not isinstance(response, dict) or not isinstance(response.get("data"), dict):
-        raise MasterSyncError(
-            "Master returned a malformed GET /api/v1/node response."
-        )
+        raise MasterSyncError("Master returned a malformed GET /api/v1/node response.")
     data = response["data"]
     returned_code = data.get("code")
     last_sequence = data.get("last_sequence")
     next_sequence = data.get("next_sequence")
     if not isinstance(returned_code, str):
-        raise MasterSyncError(
-            "Master returned a malformed GET /api/v1/node response."
-        )
+        raise MasterSyncError("Master returned a malformed GET /api/v1/node response.")
     if returned_code != expected_code:
         raise MasterSyncError(
             "Master authenticated a different franchise code "
@@ -833,9 +792,7 @@ def verify_master_enrollment_identity(
             "MASTER_API_KEY before initializing inventory."
         )
     if type(last_sequence) is not int or type(next_sequence) is not int:
-        raise MasterSyncError(
-            "Master returned a malformed GET /api/v1/node response."
-        )
+        raise MasterSyncError("Master returned a malformed GET /api/v1/node response.")
     if last_sequence != 0 or next_sequence != 1:
         raise MasterSyncError(
             f"Master node {expected_code} is not empty (expected cursor 0/1, "
@@ -861,16 +818,10 @@ def _fail_outbox_event(
 ) -> None:
     event.status = MasterOutboxStatus.FAILED.value
     event.last_error = (
-        error_message[:1000]
-        if error_message is not None
-        else _safe_error(exc, api_key=api_key)
+        error_message[:1000] if error_message is not None else _safe_error(exc, api_key=api_key)
     )
     event.sending_at = None
-    event.next_attempt_at = (
-        utc_now() + _retry_delay(event.attempts)
-        if retryable
-        else None
-    )
+    event.next_attempt_at = utc_now() + _retry_delay(event.attempts) if retryable else None
     if event.aggregate_type == "BATCH" and event.batch_id is not None:
         batch = db.get(Batch, event.batch_id)
         if batch is not None:
@@ -901,9 +852,7 @@ def _validate_event_acknowledgement(
     if not isinstance(acknowledgements, list) or not isinstance(last_sequence, int):
         raise MasterSyncError("Master returned an incomplete event acknowledgement.")
     if last_sequence < event.id:
-        raise MasterSyncError(
-            "Master acknowledgement did not advance to the submitted sequence."
-        )
+        raise MasterSyncError("Master acknowledgement did not advance to the submitted sequence.")
     matching = any(
         isinstance(ack, dict)
         and str(ack.get("event_id") or "") == event.event_id
@@ -911,9 +860,7 @@ def _validate_event_acknowledgement(
         for ack in acknowledgements
     )
     if not matching:
-        raise MasterSyncError(
-            "Master acknowledgement does not match the submitted event."
-        )
+        raise MasterSyncError("Master acknowledgement does not match the submitted event.")
 
 
 def push_pending_events(
@@ -1056,9 +1003,7 @@ def push_pending_events(
                 batch.synced_at = event.sent_at
                 batch.last_error = None
         elif event.aggregate_type == "RECEIPT":
-            receipt = db.scalar(
-                select(Receipt).where(Receipt.receipt_uuid == event.aggregate_id)
-            )
+            receipt = db.scalar(select(Receipt).where(Receipt.receipt_uuid == event.aggregate_id))
             if receipt is not None:
                 receipt.synced_at = event.sent_at
         db.commit()
@@ -1077,7 +1022,9 @@ def _command_parts(command: dict[str, Any]) -> tuple[str, str, int, dict[str, An
     try:
         schema_version = int(command.get("schema_version", COMMAND_SCHEMA_VERSION))
     except (TypeError, ValueError) as exc:
-        raise MasterSyncError(f"Master command {command_id} has an invalid schema version.") from exc
+        raise MasterSyncError(
+            f"Master command {command_id} has an invalid schema version."
+        ) from exc
     payload = command.get("payload", command.get("data", {}))
     if not isinstance(payload, dict):
         raise MasterSyncError(f"Master command {command_id} payload must be an object.")
@@ -1090,9 +1037,7 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
     command_id, command_type, schema_version, payload = _command_parts(command)
     frozen_payload = canonical_json(payload)
     frozen_hash = payload_sha256(frozen_payload)
-    row = db.scalar(
-        select(MasterInboxCommand).where(MasterInboxCommand.command_id == command_id)
-    )
+    row = db.scalar(select(MasterInboxCommand).where(MasterInboxCommand.command_id == command_id))
     if row is not None:
         if (
             row.payload_sha256 != frozen_hash
@@ -1122,11 +1067,11 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
     try:
         # Local import avoids a module cycle: transfer event creation uses the
         # generic outbox helper above.
+        from app.services.receipts import apply_receipt_review_command
         from app.services.transfer import (
             apply_transfer_available_command,
             apply_transfer_receipt_command,
         )
-        from app.services.receipts import apply_receipt_review_command
 
         if command_type in {"TRANSFER_AVAILABLE", "TRANSFER_INCOMING"}:
             apply_transfer_available_command(db, payload)
@@ -1163,9 +1108,7 @@ def _persist_failed_command(
     command_id, command_type, schema_version, payload = _command_parts(command)
     frozen_payload = canonical_json(payload)
     frozen_hash = payload_sha256(frozen_payload)
-    row = db.scalar(
-        select(MasterInboxCommand).where(MasterInboxCommand.command_id == command_id)
-    )
+    row = db.scalar(select(MasterInboxCommand).where(MasterInboxCommand.command_id == command_id))
     if row is None:
         row = MasterInboxCommand(
             command_id=command_id,
@@ -1239,9 +1182,7 @@ def poll_master_commands(
             break
 
         patch_url = f"{master_url}/api/v1/commands/{quote(row.command_id, safe='')}"
-        patch_body = canonical_json(
-            {"acknowledged": True}
-        ).encode("utf-8")
+        patch_body = canonical_json({"acknowledged": True}).encode("utf-8")
         patch_request = Request(
             patch_url,
             data=patch_body,

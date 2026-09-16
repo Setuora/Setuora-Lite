@@ -16,7 +16,7 @@
     <h1>{{ batch.batch_number }}</h1>
   </div>
   <div class="actions">
-    <span class="status {{ batch.status|lower }}">{{ batch.status }}</span>
+    <span class="status {{ batch.status|lower }}">{{ 'Sent to Master' if app_mode == 'lite' and batch.status == 'SYNCED' else 'Pending delivery' if app_mode == 'lite' and batch.status == 'PENDING_SYNC' else batch.status }}</span>
     {% if batch.batch_type == 'AUDIT' and batch.status != 'DRAFT' %}
     <a class="button" href="/batches/{{ batch.id }}/audit.pdf">Audit PDF</a>
     {% endif %}
@@ -181,7 +181,7 @@
       <dt>Created</dt><dd>{{ report_date(batch.created_at) }}</dd>
       <dt>Voucher number</dt><dd>{{ batch_voucher_number(batch) }}</dd>
       {% if app_mode == 'lite' %}
-      <dt>Master delivery</dt><dd>{{ batch.status|replace('_', ' ') }}</dd>
+      <dt>Master delivery</dt><dd>{{ 'Sent to Master' if batch.status == 'SYNCED' else 'Pending delivery' if batch.status == 'PENDING_SYNC' else batch.status|replace('_', ' ') }}</dd>
       {% else %}
       <dt>Tally reference</dt><dd>{{ batch.tally_reference or '-' }}</dd>
       <dt>Retry count</dt><dd>{{ batch.retry_count or 0 }}</dd>

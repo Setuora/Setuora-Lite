@@ -1,15 +1,7 @@
-# User Manual
+# Lite user manual
 
-Administrators configure the local Tally company under **Admin → Settings** and
-the Master exchange under **Admin → Tally SFTP**. The Tally SFTP screen shows
-whether synchronization is enabled, the latest exchange state, and any Tally or
-SFTP error without displaying credentials or XML contents.
+Staff use Lite on the franchise private LAN to record stock movements, sales, receipts, and transfers. Tally runs at Master, not on the Lite server.
 
-Normal synchronization needs no file handling by staff. Lite exports current
-debtors/creditors, uploads them to Master, downloads the consolidated XML,
-imports it into Tally, and acknowledges it. If the screen shows a failed import,
-leave synchronization paused, review Tally's Exceptions report and company
-selection, correct the cause, then use **Sync now**.
+Administrators configure **Admin → Master connection** with the permanent franchise code, Master's HTTPS origin, and this franchise's node credential. After enrollment, initialize inventory once and run the first sync. The connection page shows pending, sent, and failed events without showing credentials or event contents.
 
-Back up Tally before the first live round trip and follow the backup guide before
-restoring the Setuora database or changing the franchise SFTP identity.
+Lite records events locally and retries delivery after a network interruption. `SENT` means Master accepted an event; it does not mean the related Tally voucher succeeded. Review central voucher results and exceptions on Master. Do not reset or restore a connected Lite database without preserving and reconciling its event queue.

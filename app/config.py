@@ -31,15 +31,13 @@ FRANCHISE_CODE_PLACEHOLDERS = {
     "YOUR-FRANCHISE",
     "YOUR-FRANCHISE-CODE",
 }
-FRANCHISE_CODE_PATTERN = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$")
+FRANCHISE_CODE_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9_-]{0,19}$")
 DNS_NAME_PATTERN = re.compile(
     r"^(?=.{1,253}\.?$)"
     r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$"
 )
-MASTER_API_KEY_PATTERN = re.compile(
-    r"^setuora-node\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{32,}$"
-)
+MASTER_API_KEY_PATTERN = re.compile(r"^setuora-node\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{32,}$")
 SFTP_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SFTP_HOST_KEY_PATTERN = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -140,11 +138,7 @@ def _flag_value(value: str) -> bool:
 
 
 def _comma_separated(name: str, default: str) -> list[str]:
-    return [
-        value.strip().lower()
-        for value in os.getenv(name, default).split(",")
-        if value.strip()
-    ]
+    return [value.strip().lower() for value in os.getenv(name, default).split(",") if value.strip()]
 
 
 def _resolve_secret_key() -> str:
@@ -191,9 +185,7 @@ def master_url_configuration_error(value: str) -> str | None:
 def sftp_host_configuration_error(value: str) -> str | None:
     host = value.strip().rstrip(".")
     if not host or "://" in host or "/" in host or "\\" in host or "@" in host:
-        return (
-            "SFTP_HOST must be a DNS name or IP address without a URL scheme or path."
-        )
+        return "SFTP_HOST must be a DNS name or IP address without a URL scheme or path."
     if len(host) > 253:
         return "SFTP_HOST must be 253 characters or fewer."
     if DNS_NAME_PATTERN.fullmatch(host) is not None:
@@ -209,11 +201,7 @@ def sftp_host_configuration_error(value: str) -> str | None:
 
 def master_connection_settings_path() -> Path:
     configured = os.getenv("MASTER_CONNECTION_SETTINGS_FILE", "").strip()
-    path = (
-        Path(configured)
-        if configured
-        else PROJECT_ROOT / "data" / "master-connection.env"
-    )
+    path = Path(configured) if configured else PROJECT_ROOT / "data" / "master-connection.env"
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()
     return path
@@ -222,9 +210,7 @@ def master_connection_settings_path() -> Path:
 def save_master_connection_settings(values: dict[str, str]) -> None:
     unexpected = set(values) - MASTER_CONNECTION_RUNTIME_ENV_KEYS
     if unexpected:
-        raise ValueError(
-            f"Unsupported Master setting(s): {', '.join(sorted(unexpected))}"
-        )
+        raise ValueError(f"Unsupported Master setting(s): {', '.join(sorted(unexpected))}")
     if any("\n" in value or "\r" in value for value in values.values()):
         raise ValueError("Master settings cannot contain line breaks.")
 
@@ -248,11 +234,7 @@ def save_master_connection_settings(values: dict[str, str]) -> None:
 
 def sftp_connection_settings_path() -> Path:
     configured = os.getenv("SFTP_CONNECTION_SETTINGS_FILE", "").strip()
-    path = (
-        Path(configured)
-        if configured
-        else PROJECT_ROOT / "data" / "sftp-connection.env"
-    )
+    path = Path(configured) if configured else PROJECT_ROOT / "data" / "sftp-connection.env"
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()
     return path
@@ -261,9 +243,7 @@ def sftp_connection_settings_path() -> Path:
 def save_sftp_connection_settings(values: dict[str, str]) -> None:
     unexpected = set(values) - SFTP_CONNECTION_RUNTIME_ENV_KEYS
     if unexpected:
-        raise ValueError(
-            f"Unsupported SFTP setting(s): {', '.join(sorted(unexpected))}"
-        )
+        raise ValueError(f"Unsupported SFTP setting(s): {', '.join(sorted(unexpected))}")
     if any("\n" in value or "\r" in value for value in values.values()):
         raise ValueError("SFTP settings cannot contain line breaks.")
 
@@ -295,9 +275,7 @@ def save_sftp_connection_settings(values: dict[str, str]) -> None:
                     text=True,
                 )
             except subprocess.CalledProcessError as exc:
-                raise OSError(
-                    "Windows could not secure the SFTP credential file."
-                ) from exc
+                raise OSError("Windows could not secure the SFTP credential file.") from exc
     finally:
         if temporary.exists():
             temporary.unlink()
@@ -338,15 +316,9 @@ class Settings:
             "Setuora Lite" if self.app_mode == "lite" else "Setuora",
         )
         self.secret_key: str = _resolve_secret_key()
-        self.database_url: str = os.getenv(
-            "DATABASE_URL", "sqlite:///./data/setuora.db"
-        )
-        self.session_timeout_minutes: int = int(
-            os.getenv("SESSION_TIMEOUT_MINUTES", "480")
-        )
-        self.bootstrap_admin_username: str = os.getenv(
-            "BOOTSTRAP_ADMIN_USERNAME", "admin"
-        )
+        self.database_url: str = os.getenv("DATABASE_URL", "sqlite:///./data/setuora.db")
+        self.session_timeout_minutes: int = int(os.getenv("SESSION_TIMEOUT_MINUTES", "480"))
+        self.bootstrap_admin_username: str = os.getenv("BOOTSTRAP_ADMIN_USERNAME", "admin")
         self.bootstrap_admin_password: str = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
         self.cookie_secure: bool = _flag("SESSION_COOKIE_SECURE")
         self.trusted_hosts: list[str] = _comma_separated(
@@ -354,34 +326,26 @@ class Settings:
         )
         self.login_max_attempts: int = int(os.getenv("LOGIN_MAX_ATTEMPTS", "8"))
         self.login_lockout_minutes: int = int(os.getenv("LOGIN_LOCKOUT_MINUTES", "15"))
-        self.automatic_backups_enabled: bool = _flag(
-            "AUTOMATIC_BACKUPS_ENABLED", "true"
-        )
+        self.automatic_backups_enabled: bool = _flag("AUTOMATIC_BACKUPS_ENABLED", "true")
         self.backup_directory: str = os.getenv("BACKUP_DIRECTORY", "./data/backups")
-        self.backup_offsite_directory: str = os.getenv(
-            "BACKUP_OFFSITE_DIRECTORY", ""
-        ).strip()
+        self.backup_offsite_directory: str = os.getenv("BACKUP_OFFSITE_DIRECTORY", "").strip()
         self.backup_interval_hours: int = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
-        self.backup_retention_count: int = int(
-            os.getenv("BACKUP_RETENTION_COUNT", "14")
-        )
+        self.backup_retention_count: int = int(os.getenv("BACKUP_RETENTION_COUNT", "14"))
         self.backup_startup_delay_seconds: int = int(
             os.getenv("BACKUP_STARTUP_DELAY_SECONDS", "60")
         )
         self.container_deployment: bool = _flag("SETUORA_CONTAINER_DEPLOYMENT", "false")
         self.franchise_code: str = (
-            sftp_runtime.get(
+            master_runtime.get(
                 "FRANCHISE_CODE",
-                master_runtime.get("FRANCHISE_CODE", os.getenv("FRANCHISE_CODE", "")),
+                os.getenv("FRANCHISE_CODE", ""),
             )
             .strip()
             .upper()
         )
         self.master_url: str = master_value("MASTER_URL").strip().rstrip("/")
         self.master_api_key: str = master_value("MASTER_API_KEY").strip()
-        self.master_sync_enabled: bool = _flag_value(
-            master_value("MASTER_SYNC_ENABLED", "false")
-        )
+        self.master_sync_enabled: bool = _flag_value(master_value("MASTER_SYNC_ENABLED", "false"))
         self.master_sync_interval_seconds: int = max(
             15,
             int(master_value("MASTER_SYNC_INTERVAL_SECONDS", "30")),
@@ -390,12 +354,8 @@ class Settings:
             3,
             int(master_value("MASTER_REQUEST_TIMEOUT_SECONDS", "15")),
         )
-        self.master_tls_verify: bool = _flag_value(
-            master_value("MASTER_TLS_VERIFY", "true")
-        )
-        self.sftp_sync_enabled: bool = _flag_value(
-            sftp_value("SFTP_SYNC_ENABLED", "false")
-        )
+        self.master_tls_verify: bool = _flag_value(master_value("MASTER_TLS_VERIFY", "true"))
+        self.sftp_sync_enabled: bool = _flag_value(sftp_value("SFTP_SYNC_ENABLED", "false"))
         self.sftp_host: str = sftp_value("SFTP_HOST").strip()
         self.sftp_port: int = int(sftp_value("SFTP_PORT", "22"))
         self.sftp_username: str = sftp_value("SFTP_USERNAME").strip()
@@ -416,10 +376,7 @@ class Settings:
 
     @property
     def using_default_secret(self) -> bool:
-        return (
-            self.secret_key in PLACEHOLDER_SECRET_KEYS
-            or len(self.secret_key.strip()) < 32
-        )
+        return self.secret_key in PLACEHOLDER_SECRET_KEYS or len(self.secret_key.strip()) < 32
 
     @property
     def master_sync_configuration_error(self) -> str | None:
@@ -427,10 +384,10 @@ class Settings:
             return None
         if (
             self.franchise_code in FRANCHISE_CODE_PLACEHOLDERS
-            or len(self.franchise_code) > 40
+            or len(self.franchise_code) > 20
             or FRANCHISE_CODE_PATTERN.fullmatch(self.franchise_code) is None
         ):
-            return "FRANCHISE_CODE must be a permanent, unique code of at most 40 characters."
+            return "FRANCHISE_CODE must be a permanent, unique code of at most 20 characters."
         master_url_error = master_url_configuration_error(self.master_url)
         if master_url_error:
             return master_url_error

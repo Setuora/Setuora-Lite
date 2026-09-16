@@ -49,7 +49,7 @@
           <td>{{ batch.batch_type }}</td>
           <td>{{ batch.party_name or '-' }}</td>
           <td>{{ batch.reason_code or '-' }}</td>
-          <td><span class="status {{ batch.status|lower }}">{{ batch.status }}</span></td>
+          <td><span class="status {{ batch.status|lower }}">{{ 'Sent to Master' if app_mode == 'lite' and batch.status == 'SYNCED' else 'Pending delivery' if app_mode == 'lite' and batch.status == 'PENDING_SYNC' else batch.status }}</span></td>
           <td>{{ batch.items|length }}</td>
           {% if app_mode != 'lite' %}<td>{{ batch.retry_count or 0 }}</td>{% endif %}
           <td>{{ batch.created_at.strftime('%d %b %Y %H:%M') }}</td>

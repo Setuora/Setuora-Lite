@@ -1,5 +1,7 @@
 # Windows Franchise SFTP/Tally Topology
 
+> Historical franchise-Tally design. For the current one-Tally-at-Master system, see [central Tally topology](central-tally-topology.md).
+
 Setuora Lite is installed on the Windows server in each franchise. It is the
 franchise-side participant shown in the synchronization architecture.
 

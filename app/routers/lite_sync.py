@@ -28,9 +28,6 @@ from app.models import (
     MasterOutboxEvent,
     MasterOutboxStatus,
     Role,
-    Serial,
-    SerialStatus,
-    TallySftpExchange,
 )
 from app.services.master_sync import (
     MasterSyncError,
@@ -40,10 +37,9 @@ from app.services.master_sync import (
     push_pending_events,
     verify_master_enrollment_identity,
 )
-from app.services.settings import get_all_settings, update_settings
+from app.services.settings import update_settings
 from app.services.sftp_tally_sync import (
     SftpTallySyncError,
-    recent_sftp_exchanges,
     run_sftp_tally_sync_cycle,
 )
 from app.templates import templates
@@ -64,41 +60,32 @@ def _require_sync_admin(request: Request, db: Session):
 def master_connection_page(request: Request, db: Session = Depends(get_db)):
     user = _require_sync_admin(request, db)
     settings = get_settings()
-    tally_settings = get_all_settings(db)
     status_rows = db.execute(
-        select(TallySftpExchange.status, func.count(TallySftpExchange.id)).group_by(
-            TallySftpExchange.status
+        select(MasterOutboxEvent.status, func.count(MasterOutboxEvent.id)).group_by(
+            MasterOutboxEvent.status
         )
     ).all()
     counts = {status: count for status, count in status_rows}
-    last_completed = db.scalar(
-        select(TallySftpExchange)
-        .where(TallySftpExchange.completed_at.is_not(None))
-        .order_by(TallySftpExchange.completed_at.desc())
-        .limit(1)
-    )
+    command_count = db.scalar(select(func.count(MasterInboxCommand.id))) or 0
+    recent_events = db.scalars(
+        select(MasterOutboxEvent).order_by(MasterOutboxEvent.id.desc()).limit(25)
+    ).all()
     return templates.TemplateResponse(
         request,
         "master_connection.html",
         {
             "request": request,
             "user": user,
-            "sync_enabled": settings.sftp_sync_enabled,
+            "sync_enabled": settings.master_sync_enabled,
             "franchise_code": settings.franchise_code or "Not configured",
-            "sftp_host": settings.sftp_host or "Not configured",
-            "sftp_port": settings.sftp_port,
-            "sftp_username": settings.sftp_username or "Not configured",
-            "password_configured": bool(settings.sftp_password),
-            "host_key_sha256": settings.sftp_host_key_sha256,
-            "interval_seconds": settings.sftp_sync_interval_seconds,
-            "request_timeout_seconds": settings.sftp_connect_timeout_seconds,
-            "configuration_error": settings.sftp_sync_configuration_error,
+            "master_url": settings.master_url,
+            "credential_configured": bool(settings.master_api_key),
+            "interval_seconds": settings.master_sync_interval_seconds,
+            "request_timeout_seconds": settings.master_request_timeout_seconds,
+            "configuration_error": settings.master_sync_configuration_error,
             "counts": counts,
-            "last_completed": last_completed,
-            "recent_exchanges": recent_sftp_exchanges(db),
-            "tally_company": tally_settings.get("company_name", ""),
-            "tally_host": tally_settings.get("tally_host", "127.0.0.1"),
-            "tally_port": tally_settings.get("tally_port", "9000"),
+            "command_count": command_count,
+            "recent_events": recent_events,
             "message": request.query_params.get("message"),
             "error": request.query_params.get("error"),
         },
@@ -112,7 +99,6 @@ def _connection_form_error(message: str) -> RedirectResponse:
     )
 
 
-@router.post("/sftp-settings")
 def update_sftp_connection_settings(
     request: Request,
     franchise_code: Annotated[str, Form()],
@@ -161,21 +147,13 @@ def update_sftp_connection_settings(
         timeout = int(sftp_connect_timeout_seconds)
         local_tally_port = int(tally_port)
     except ValueError:
-        return _connection_form_error(
-            "Ports, interval, and timeout must be whole numbers."
-        )
+        return _connection_form_error("Ports, interval, and timeout must be whole numbers.")
     if not 1 <= port <= 65535 or not 1 <= local_tally_port <= 65535:
-        return _connection_form_error(
-            "SFTP and Tally ports must be between 1 and 65535."
-        )
+        return _connection_form_error("SFTP and Tally ports must be between 1 and 65535.")
     if not 15 <= interval <= MAX_SFTP_INTERVAL_SECONDS:
-        return _connection_form_error(
-            "Sync interval must be between 15 and 3600 seconds."
-        )
+        return _connection_form_error("Sync interval must be between 15 and 3600 seconds.")
     if not 3 <= timeout <= MAX_SFTP_CONNECT_TIMEOUT_SECONDS:
-        return _connection_form_error(
-            "Connection timeout must be between 3 and 120 seconds."
-        )
+        return _connection_form_error("Connection timeout must be between 3 and 120 seconds.")
     if not tally_company.strip() or not tally_host.strip():
         return _connection_form_error("Tally company and host are required.")
 
@@ -205,24 +183,18 @@ def update_sftp_connection_settings(
     except (OSError, ValueError) as exc:
         return _connection_form_error(f"Could not save SFTP settings: {exc}")
     return RedirectResponse(
-        "/master-connection?"
-        + urlencode({"message": "Tally and Master SFTP settings saved."}),
+        "/master-connection?" + urlencode({"message": "Tally and Master SFTP settings saved."}),
         status_code=303,
     )
 
 
-@router.post("/sync")
 def sync_sftp_now(request: Request, db: Session = Depends(get_db)):
     _require_sync_admin(request, db)
     settings = get_settings()
     if not settings.sftp_sync_enabled:
-        raise HTTPException(
-            status_code=409, detail="Tally SFTP synchronization is disabled."
-        )
+        raise HTTPException(status_code=409, detail="Tally SFTP synchronization is disabled.")
     if settings.sftp_sync_configuration_error:
-        raise HTTPException(
-            status_code=409, detail=settings.sftp_sync_configuration_error
-        )
+        raise HTTPException(status_code=409, detail=settings.sftp_sync_configuration_error)
     try:
         result = run_sftp_tally_sync_cycle(db)
     except SftpTallySyncError as exc:
@@ -233,6 +205,7 @@ def sync_sftp_now(request: Request, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/settings")
 def update_master_connection_settings(
     request: Request,
     franchise_code: Annotated[str, Form()],
@@ -253,11 +226,11 @@ def update_master_connection_settings(
     if (
         not normalized_code
         or normalized_code in FRANCHISE_CODE_PLACEHOLDERS
-        or len(normalized_code) > 40
+        or len(normalized_code) > 20
         or FRANCHISE_CODE_PATTERN.fullmatch(normalized_code) is None
     ):
         return _connection_form_error(
-            "Franchise code must be a permanent code of at most 40 uppercase letters, numbers, and hyphens."
+            "Franchise code must be a permanent 1-20 character code using letters, numbers, underscores, or hyphens."
         )
 
     existing_event = db.scalar(select(MasterOutboxEvent.id).limit(1))
@@ -278,9 +251,7 @@ def update_master_connection_settings(
         interval = int(master_sync_interval_seconds)
         timeout = int(master_request_timeout_seconds)
     except ValueError:
-        return _connection_form_error(
-            "Sync interval and request timeout must be whole numbers."
-        )
+        return _connection_form_error("Sync interval and request timeout must be whole numbers.")
     if not 15 <= interval <= MAX_SYNC_INTERVAL_SECONDS:
         return _connection_form_error(
             f"Sync interval must be between 15 and {MAX_SYNC_INTERVAL_SECONDS} seconds."
@@ -303,30 +274,23 @@ def update_master_connection_settings(
             }
         )
     except (OSError, ValueError) as exc:
-        return _connection_form_error(
-            f"Could not save Master connection settings: {exc}"
-        )
+        return _connection_form_error(f"Could not save Master connection settings: {exc}")
 
     return RedirectResponse(
         "/master-connection?"
         + urlencode(
-            {
-                "message": (
-                    "Master connection settings saved. Use Sync now to verify connectivity."
-                )
-            }
+            {"message": ("Master connection settings saved. Use Sync now to verify connectivity.")}
         ),
         status_code=303,
     )
 
 
+@router.post("/sync")
 def sync_master_now(request: Request, db: Session = Depends(get_db)):
     _require_sync_admin(request, db)
     settings = get_settings()
     if not settings.master_sync_enabled:
-        raise HTTPException(
-            status_code=409, detail="Master synchronization is disabled."
-        )
+        raise HTTPException(status_code=409, detail="Master synchronization is disabled.")
     if settings.master_sync_configuration_error:
         raise HTTPException(
             status_code=409,
@@ -339,13 +303,12 @@ def sync_master_now(request: Request, db: Session = Depends(get_db)):
         query = urlencode({"error": str(exc)})
         return RedirectResponse(f"/master-connection?{query}", status_code=303)
     query = urlencode(
-        {
-            "message": f"Sync complete: {sent} event(s) sent, {commands} command(s) applied."
-        }
+        {"message": f"Sync complete: {sent} event(s) sent, {commands} command(s) applied."}
     )
     return RedirectResponse(f"/master-connection?{query}", status_code=303)
 
 
+@router.post("/initialize")
 def initialize_inventory(
     request: Request,
     db: Session = Depends(get_db),
@@ -385,9 +348,7 @@ def retry_failed_event(
     if event is None:
         raise HTTPException(status_code=404, detail="Outbox event not found.")
     if event.status != MasterOutboxStatus.FAILED.value:
-        raise HTTPException(
-            status_code=409, detail="Only failed events can be retried."
-        )
+        raise HTTPException(status_code=409, detail="Only failed events can be retried.")
     if payload_sha256(event.payload_json) != event.payload_sha256:
         raise HTTPException(
             status_code=409,

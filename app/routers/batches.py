@@ -1,6 +1,15 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
@@ -9,8 +18,8 @@ from app.auth import ADMIN_ROLES, require_permission, require_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import (
-    AuditFinding,
     AuditAssignment,
+    AuditFinding,
     Batch,
     BatchItem,
     BatchStatus,
@@ -24,9 +33,10 @@ from app.models import (
     TallyLedgerCache,
     has_any_role,
 )
+from app.services.access_control import role_has_access
 from app.services.audit import reconcile_audit_batch, summarize_audit_findings
-from app.services.exports import audit_report_pdf
 from app.services.expiry import add_fefo_serials_to_batch, fefo_available_statuses
+from app.services.exports import audit_report_pdf
 from app.services.inventory import (
     DEFAULT_UNREGISTERED_SALE_STATE,
     InventoryError,
@@ -42,9 +52,6 @@ from app.services.inventory import (
 )
 from app.services.master_sync import enqueue_batch_submitted_event
 from app.services.preinvoice import sale_preinvoice_pdf
-from app.services.access_control import role_has_access
-from app.services.settings import get_active_company, get_all_settings
-from app.services.tally_access import allowed_ledger_names, resource_key
 from app.services.relocation import find_location_by_code
 from app.services.report_format import report_date
 from app.services.sale_returns import (
@@ -54,6 +61,7 @@ from app.services.sale_returns import (
     validate_sale_returns_complete,
     verify_sale_return_on_shelf,
 )
+from app.services.settings import get_active_company, get_all_settings
 from app.services.shelf_verification import (
     ShelfVerificationError,
     ensure_product_scan_allowed,
@@ -61,7 +69,12 @@ from app.services.shelf_verification import (
     verify_pending_items_on_shelf,
 )
 from app.services.sync_worker import queue_batch_for_sync
-from app.services.tally import TALLY_XML_SUPPORTED_BATCH_TYPES, TallySyncError, build_voucher_xml
+from app.services.tally import (
+    TALLY_XML_SUPPORTED_BATCH_TYPES,
+    TallySyncError,
+    build_voucher_xml,
+)
+from app.services.tally_access import allowed_ledger_names, resource_key
 from app.services.tally_excel import (
     MAX_TALLY_EXCEL_UPLOAD_BYTES,
     TALLY_ACCOUNTING_REQUIRED_EXPORT_FIELDS,
@@ -278,7 +291,9 @@ def sale_product_options_for_type(db: Session, batch_type: str) -> list[dict[str
         .subquery()
     )
     rows = db.execute(
-        select(Product, func.coalesce(available.c.available_quantity, 0).label("available_quantity"))
+        select(
+            Product, func.coalesce(available.c.available_quantity, 0).label("available_quantity")
+        )
         .outerjoin(available, Product.id == available.c.product_id)
         .where(Product.active.is_(True))
         .order_by(Product.product_code)
@@ -305,9 +320,21 @@ def party_ledger_options(db: Session, batch_type: BatchType, user=None) -> list[
     related_types = {
         BatchType.SALE: (BatchType.SALE.value, BatchType.SALES_RETURN.value),
         BatchType.SALES_RETURN: (BatchType.SALE.value, BatchType.SALES_RETURN.value),
-        BatchType.PURCHASE: (BatchType.PURCHASE.value, BatchType.RECEIVE.value, BatchType.PURCHASE_RETURN.value),
-        BatchType.RECEIVE: (BatchType.PURCHASE.value, BatchType.RECEIVE.value, BatchType.PURCHASE_RETURN.value),
-        BatchType.PURCHASE_RETURN: (BatchType.PURCHASE.value, BatchType.RECEIVE.value, BatchType.PURCHASE_RETURN.value),
+        BatchType.PURCHASE: (
+            BatchType.PURCHASE.value,
+            BatchType.RECEIVE.value,
+            BatchType.PURCHASE_RETURN.value,
+        ),
+        BatchType.RECEIVE: (
+            BatchType.PURCHASE.value,
+            BatchType.RECEIVE.value,
+            BatchType.PURCHASE_RETURN.value,
+        ),
+        BatchType.PURCHASE_RETURN: (
+            BatchType.PURCHASE.value,
+            BatchType.RECEIVE.value,
+            BatchType.PURCHASE_RETURN.value,
+        ),
     }.get(batch_type)
     if not related_types:
         return []
@@ -385,9 +412,7 @@ def batch_permission_context(
         "can_tally_xml": can_tally_xml,
         "can_tally_excel_export": can_tally_excel_export,
         "can_tally_excel_import": can_fefo,
-        "can_retry_sync": role_has_access(
-            db, user.role, "tally_sync_retry", {"edit", "yes"}
-        ),
+        "can_retry_sync": role_has_access(db, user.role, "tally_sync_retry", {"edit", "yes"}),
         "can_view_attempts": role_has_access(db, user.role, "tally_attempts"),
         "can_view_batch_list": role_has_access(db, user.role, "batch_list"),
     }
@@ -395,21 +420,24 @@ def batch_permission_context(
 
 def request_app_mode(request: Request) -> str:
     app = request.scope.get("app")
-    return str(
-        getattr(getattr(app, "state", None), "app_mode", "legacy")
-    ).strip().lower()
+    return str(getattr(getattr(app, "state", None), "app_mode", "legacy")).strip().lower()
 
 
 def require_local_tally_mode(request: Request) -> None:
-    # Both supported Windows compositions use their local Tally gateway.
-    return None
+    if request_app_mode(request) == "lite":
+        raise HTTPException(
+            status_code=404,
+            detail="Tally is managed by Setuora Master.",
+        )
 
 
 def parse_batch_type(value: str) -> BatchType:
     try:
         return BatchType(value)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid batch type") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid batch type"
+        ) from exc
 
 
 def batch_form_context(
@@ -432,9 +460,15 @@ def batch_form_context(
     notes: str = "",
     error: str | None = None,
 ) -> dict[str, object]:
-    selected_registration = party_gst_registration_type or GstRegistrationType.UNREGISTERED_CONSUMER.value
+    selected_registration = (
+        party_gst_registration_type or GstRegistrationType.UNREGISTERED_CONSUMER.value
+    )
     selected_state = party_state
-    if batch_type == BatchType.SALE and not selected_state and selected_registration == GstRegistrationType.UNREGISTERED_CONSUMER.value:
+    if (
+        batch_type == BatchType.SALE
+        and not selected_state
+        and selected_registration == GstRegistrationType.UNREGISTERED_CONSUMER.value
+    ):
         selected_state = DEFAULT_UNREGISTERED_SALE_STATE
     selected_gst_treatment = (
         gst_treatment or sale_gst_treatment_for_state(selected_state)
@@ -447,9 +481,7 @@ def batch_form_context(
         "batch_type": batch_type,
         "party_name": party_name,
         "party_state": selected_state,
-        "party_gst_registration_type": (
-            selected_registration
-        ),
+        "party_gst_registration_type": (selected_registration),
         "party_gst_name": party_gst_name,
         "party_gstin": party_gstin,
         "gst_treatment": selected_gst_treatment,
@@ -527,7 +559,11 @@ def _summary_payload(batch: Batch) -> dict[str, object]:
 
 
 def _batch_items_payload(batch: Batch) -> list[dict[str, object]]:
-    shelf_controlled = batch.batch_type in {BatchType.PURCHASE.value, BatchType.RECEIVE.value, BatchType.AUDIT.value}
+    shelf_controlled = batch.batch_type in {
+        BatchType.PURCHASE.value,
+        BatchType.RECEIVE.value,
+        BatchType.AUDIT.value,
+    }
     return [
         {
             "id": item.id,
@@ -537,15 +573,21 @@ def _batch_items_payload(batch: Batch) -> list[dict[str, object]]:
             "expiry_date": report_date(item.serial.expiry_date) if item.serial.expiry_date else "-",
             "fefo_picked": bool(item.fefo_picked),
             "shelf_code": item.shelf_location.code if item.shelf_location else "",
-            "shelf_verified_at": report_date(item.shelf_verified_at) if item.shelf_verified_at else "",
+            "shelf_verified_at": report_date(item.shelf_verified_at)
+            if item.shelf_verified_at
+            else "",
             "shelf_pending": bool(
                 shelf_controlled
                 and item.serial.product.shelf_verification_interval
                 and not item.shelf_verified_at
             ),
-            "shelf_required": bool(shelf_controlled and item.serial.product.shelf_verification_interval),
+            "shelf_required": bool(
+                shelf_controlled and item.serial.product.shelf_verification_interval
+            ),
             "status": item.serial.display_status,
-            "rate": _money_text(item.rate if item.rate is not None else item.serial.product.default_rate),
+            "rate": _money_text(
+                item.rate if item.rate is not None else item.serial.product.default_rate
+            ),
         }
         for item in batch.items
     ]
@@ -556,9 +598,7 @@ def batch_scan_state(db: Session, batch_id: int) -> dict[str, object]:
         select(Batch)
         .where(Batch.id == batch_id)
         .options(
-            selectinload(Batch.items)
-            .selectinload(BatchItem.serial)
-            .selectinload(Serial.product),
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product),
             selectinload(Batch.items).selectinload(BatchItem.shelf_location),
         )
     )
@@ -675,11 +715,7 @@ def create_batch_route(
             )
         )
         now = datetime.now(timezone.utc)
-        if (
-            not assignment
-            or as_utc(assignment.starts_at) > now
-            or as_utc(assignment.ends_at) < now
-        ):
+        if not assignment or as_utc(assignment.starts_at) > now or as_utc(assignment.ends_at) < now:
             return templates.TemplateResponse(
                 request,
                 "batch_new.html",
@@ -696,9 +732,7 @@ def create_batch_route(
             )
         if any(batch.status == BatchStatus.DRAFT.value for batch in assignment.batches):
             draft = next(
-                batch
-                for batch in assignment.batches
-                if batch.status == BatchStatus.DRAFT.value
+                batch for batch in assignment.batches if batch.status == BatchStatus.DRAFT.value
             )
             return RedirectResponse(f"/batches/{draft.id}", status_code=303)
         party_name = assignment.product.product_name
@@ -708,10 +742,13 @@ def create_batch_route(
     cgst_rate = sgst_rate = igst_rate = None
     if parsed == BatchType.SALE:
         try:
-            selected_gst_registration_type = normalize_gst_registration_type(
-                party_gst_registration_type,
-                parsed,
-            ) or ""
+            selected_gst_registration_type = (
+                normalize_gst_registration_type(
+                    party_gst_registration_type,
+                    parsed,
+                )
+                or ""
+            )
             if (
                 selected_gst_registration_type == GstRegistrationType.UNREGISTERED_CONSUMER.value
                 and not party_state
@@ -750,7 +787,9 @@ def create_batch_route(
         BatchType.PURCHASE_RETURN,
     }
     if party_required and not party_name.strip():
-        party_label = "Customer" if parsed in {BatchType.SALE, BatchType.SALES_RETURN} else "Supplier"
+        party_label = (
+            "Customer" if parsed in {BatchType.SALE, BatchType.SALES_RETURN} else "Supplier"
+        )
         return templates.TemplateResponse(
             request,
             "batch_new.html",
@@ -832,7 +871,9 @@ def create_batch_route(
                 party_gstin=party_gstin,
                 gst_treatment=selected_gst_treatment or gst_treatment,
                 party_name_options=party_ledger_options(db, parsed, user),
-                audit_assignments=open_audit_assignments(db, user) if parsed == BatchType.AUDIT else [],
+                audit_assignments=open_audit_assignments(db, user)
+                if parsed == BatchType.AUDIT
+                else [],
                 audit_assignment_id=audit_assignment_id,
                 notes=notes,
                 error=str(exc),
@@ -896,7 +937,9 @@ def scan_into_batch(
         return JSONResponse({"ok": False, "error": "Batch not found"}, status_code=404)
     user = require_permission(request, db, action_key_for_batch(BatchType(batch.batch_type)))
     if not scan_source_allowed(db, user, scan_source):
-        return JSONResponse({"ok": False, "error": "Use camera scan to add serials"}, status_code=403)
+        return JSONResponse(
+            {"ok": False, "error": "Use camera scan to add serials"}, status_code=403
+        )
     normalized_scan_mode = scan_mode.strip().lower()
     location = find_location_by_code(db, serial_number)
     if location:
@@ -1009,11 +1052,18 @@ def fefo_pick_into_batch(
     try:
         add_fefo_serials_to_batch(db, batch, user, product_id, quantity)
     except InventoryError as exc:
-        batch = db.scalar(
-            select(Batch)
-            .where(Batch.id == batch_id)
-            .options(selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
-        ) or batch
+        batch = (
+            db.scalar(
+                select(Batch)
+                .where(Batch.id == batch_id)
+                .options(
+                    selectinload(Batch.items)
+                    .selectinload(BatchItem.serial)
+                    .selectinload(Serial.product)
+                )
+            )
+            or batch
+        )
         return templates.TemplateResponse(
             request,
             "batch_detail.html",
@@ -1082,7 +1132,9 @@ def update_product_rate(
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
-        .options(selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
+        .options(
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product)
+        )
     )
     if not batch:
         return RedirectResponse("/batches", status_code=303)
@@ -1103,7 +1155,9 @@ def submit_batch(request: Request, batch_id: int, db: Session = Depends(get_db))
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
-        .options(selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
+        .options(
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product)
+        )
     )
     if not batch:
         return RedirectResponse("/batches", status_code=303)
@@ -1153,12 +1207,18 @@ def retry_batch(request: Request, batch_id: int, db: Session = Depends(get_db)):
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
-        .options(selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
+        .options(
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product)
+        )
     )
     if not batch:
         return RedirectResponse("/batches", status_code=303)
     require_permission(request, db, "tally_sync_retry", {"edit", "yes"})
-    if batch.status in {BatchStatus.PENDING_SYNC.value, BatchStatus.FAILED.value, BatchStatus.SUBMITTED.value}:
+    if batch.status in {
+        BatchStatus.PENDING_SYNC.value,
+        BatchStatus.FAILED.value,
+        BatchStatus.SUBMITTED.value,
+    }:
         queue_batch_for_sync(db, batch)
     return RedirectResponse(f"/batches/{batch.id}", status_code=303)
 
@@ -1168,7 +1228,10 @@ def audit_pdf(request: Request, batch_id: int, db: Session = Depends(get_db)):
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
-        .options(selectinload(Batch.audit_findings), selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
+        .options(
+            selectinload(Batch.audit_findings),
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product),
+        )
     )
     if not batch:
         return RedirectResponse("/batches", status_code=303)
@@ -1188,9 +1251,7 @@ def sale_preinvoice(request: Request, batch_id: int, db: Session = Depends(get_d
         select(Batch)
         .where(Batch.id == batch_id)
         .options(
-            selectinload(Batch.items)
-            .selectinload(BatchItem.serial)
-            .selectinload(Serial.product)
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product)
         )
     )
     if not batch:
@@ -1207,9 +1268,7 @@ def sale_preinvoice(request: Request, batch_id: int, db: Session = Depends(get_d
         sale_preinvoice_pdf(batch, get_all_settings(db)),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": (
-                f"attachment; filename={batch.batch_number}-preinvoice.pdf"
-            )
+            "Content-Disposition": (f"attachment; filename={batch.batch_number}-preinvoice.pdf")
         },
     )
 
@@ -1220,7 +1279,9 @@ def tally_xml_preview(request: Request, batch_id: int, db: Session = Depends(get
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
-        .options(selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
+        .options(
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product)
+        )
     )
     if not batch:
         return RedirectResponse("/batches", status_code=303)
@@ -1254,7 +1315,9 @@ def tally_excel_export(
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
-        .options(selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
+        .options(
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product)
+        )
     )
     if not batch:
         return RedirectResponse("/batches", status_code=303)
@@ -1293,7 +1356,9 @@ def tally_excel_import(
     batch = db.scalar(
         select(Batch)
         .where(Batch.id == batch_id)
-        .options(selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
+        .options(
+            selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product)
+        )
     )
     if not batch:
         return RedirectResponse("/batches", status_code=303)
@@ -1306,15 +1371,20 @@ def tally_excel_import(
         result = import_tally_excel_to_batch(db, batch, user, data)
     except InventoryError as exc:
         db.rollback()
-        batch = db.scalar(
-            select(Batch)
-            .where(Batch.id == batch_id)
-            .options(
-                selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product),
-                selectinload(Batch.sync_attempts),
-                selectinload(Batch.audit_findings).selectinload(AuditFinding.serial),
+        batch = (
+            db.scalar(
+                select(Batch)
+                .where(Batch.id == batch_id)
+                .options(
+                    selectinload(Batch.items)
+                    .selectinload(BatchItem.serial)
+                    .selectinload(Serial.product),
+                    selectinload(Batch.sync_attempts),
+                    selectinload(Batch.audit_findings).selectinload(AuditFinding.serial),
+                )
             )
-        ) or batch
+            or batch
+        )
         return templates.TemplateResponse(
             request,
             "batch_detail.html",
@@ -1336,11 +1406,15 @@ def tally_excel_import(
             },
             status_code=400,
         )
-    return RedirectResponse(f"/batches/{batch.id}?excel_imported={result.quantity}", status_code=303)
+    return RedirectResponse(
+        f"/batches/{batch.id}?excel_imported={result.quantity}", status_code=303
+    )
 
 
 @router.get("/{batch_id}/sync-attempts/{attempt_id}")
-def sync_attempt_detail(request: Request, batch_id: int, attempt_id: int, db: Session = Depends(get_db)):
+def sync_attempt_detail(
+    request: Request, batch_id: int, attempt_id: int, db: Session = Depends(get_db)
+):
     require_local_tally_mode(request)
     batch = db.get(Batch, batch_id)
     attempt = db.get(SyncAttempt, attempt_id)

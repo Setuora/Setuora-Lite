@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 from app.auth import require_permission, require_user
 from app.database import get_db
 from app.models import Company, Role
-from app.services.access_control import ROLE_COLUMNS, config_from_form, role_access_sections, save_role_access_config
+from app.services.access_control import (
+    ROLE_COLUMNS,
+    config_from_form,
+    role_access_sections,
+    save_role_access_config,
+)
 from app.services.change_audit import record_change
 from app.services.settings import (
     DEFAULT_SETTINGS,
@@ -58,7 +63,15 @@ def validate_settings(requested: dict[str, str]) -> str | None:
     return None
 
 
-def render_settings(request: Request, db: Session, *, settings: dict | None = None, error: str | None = None, status_code: int = 200, open_settings: bool = False):
+def render_settings(
+    request: Request,
+    db: Session,
+    *,
+    settings: dict | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+    open_settings: bool = False,
+):
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -145,6 +158,14 @@ def save_settings(
     current_settings = get_all_settings(db)
     purchase_sync = "true" if tally_purchase_enabled == "true" else "false"
     sales_sync = "true" if tally_sales_enabled == "true" else "false"
+    if request.app.state.app_mode == "lite" and "true" in {purchase_sync, sales_sync}:
+        return render_settings(
+            request,
+            db,
+            error="Configure Tally synchronization on Setuora Master, not on Lite.",
+            status_code=400,
+            open_settings=True,
+        )
     requested = {
         "company_name": company_name.strip(),
         "tally_enabled": "true" if "true" in {purchase_sync, sales_sync} else "false",
@@ -157,12 +178,24 @@ def save_settings(
             if tally_stock_location is None
             else tally_stock_location.strip() or "Main Location"
         ),
-        "sales_voucher_type": current_settings["sales_voucher_type"] if sales_voucher_type is None else sales_voucher_type.strip(),
-        "purchase_voucher_type": current_settings["purchase_voucher_type"] if purchase_voucher_type is None else purchase_voucher_type.strip(),
-        "sales_ledger_name": current_settings["sales_ledger_name"] if sales_ledger_name is None else sales_ledger_name.strip(),
-        "purchase_ledger_name": current_settings["purchase_ledger_name"] if purchase_ledger_name is None else purchase_ledger_name.strip(),
-        "cgst_ledger_name": current_settings["cgst_ledger_name"] if cgst_ledger_name is None else cgst_ledger_name.strip(),
-        "sgst_ledger_name": current_settings["sgst_ledger_name"] if sgst_ledger_name is None else sgst_ledger_name.strip(),
+        "sales_voucher_type": current_settings["sales_voucher_type"]
+        if sales_voucher_type is None
+        else sales_voucher_type.strip(),
+        "purchase_voucher_type": current_settings["purchase_voucher_type"]
+        if purchase_voucher_type is None
+        else purchase_voucher_type.strip(),
+        "sales_ledger_name": current_settings["sales_ledger_name"]
+        if sales_ledger_name is None
+        else sales_ledger_name.strip(),
+        "purchase_ledger_name": current_settings["purchase_ledger_name"]
+        if purchase_ledger_name is None
+        else purchase_ledger_name.strip(),
+        "cgst_ledger_name": current_settings["cgst_ledger_name"]
+        if cgst_ledger_name is None
+        else cgst_ledger_name.strip(),
+        "sgst_ledger_name": current_settings["sgst_ledger_name"]
+        if sgst_ledger_name is None
+        else sgst_ledger_name.strip(),
         "sales_gst_ledger_mappings": sales_gst_ledger_mappings.strip(),
         "round_off_ledger_name": round_off_ledger_name.strip(),
         "retry_interval_seconds": retry_interval_seconds.strip(),
@@ -173,7 +206,14 @@ def save_settings(
         settings = {**current_settings, **requested}
         for key in ("tally_enabled", "tally_purchase_enabled", "tally_sales_enabled"):
             settings[key] = current_settings.get(key, "false")
-        return render_settings(request, db, settings=settings, error=validation_error, status_code=400, open_settings=True)
+        return render_settings(
+            request,
+            db,
+            settings=settings,
+            error=validation_error,
+            status_code=400,
+            open_settings=True,
+        )
 
     if requested["tally_enabled"] == "true":
         try:
@@ -245,12 +285,24 @@ def autosave_settings(
             if tally_stock_location is None
             else tally_stock_location.strip() or "Main Location"
         ),
-        "sales_voucher_type": before_settings["sales_voucher_type"] if sales_voucher_type is None else sales_voucher_type.strip(),
-        "purchase_voucher_type": before_settings["purchase_voucher_type"] if purchase_voucher_type is None else purchase_voucher_type.strip(),
-        "sales_ledger_name": before_settings["sales_ledger_name"] if sales_ledger_name is None else sales_ledger_name.strip(),
-        "purchase_ledger_name": before_settings["purchase_ledger_name"] if purchase_ledger_name is None else purchase_ledger_name.strip(),
-        "cgst_ledger_name": before_settings["cgst_ledger_name"] if cgst_ledger_name is None else cgst_ledger_name.strip(),
-        "sgst_ledger_name": before_settings["sgst_ledger_name"] if sgst_ledger_name is None else sgst_ledger_name.strip(),
+        "sales_voucher_type": before_settings["sales_voucher_type"]
+        if sales_voucher_type is None
+        else sales_voucher_type.strip(),
+        "purchase_voucher_type": before_settings["purchase_voucher_type"]
+        if purchase_voucher_type is None
+        else purchase_voucher_type.strip(),
+        "sales_ledger_name": before_settings["sales_ledger_name"]
+        if sales_ledger_name is None
+        else sales_ledger_name.strip(),
+        "purchase_ledger_name": before_settings["purchase_ledger_name"]
+        if purchase_ledger_name is None
+        else purchase_ledger_name.strip(),
+        "cgst_ledger_name": before_settings["cgst_ledger_name"]
+        if cgst_ledger_name is None
+        else cgst_ledger_name.strip(),
+        "sgst_ledger_name": before_settings["sgst_ledger_name"]
+        if sgst_ledger_name is None
+        else sgst_ledger_name.strip(),
         "sales_gst_ledger_mappings": sales_gst_ledger_mappings.strip(),
         "round_off_ledger_name": round_off_ledger_name.strip(),
         "retry_interval_seconds": retry_interval_seconds.strip(),

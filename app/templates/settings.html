@@ -9,7 +9,7 @@
   </div>
   {% if (role_can(user, 'page_tally_check') and role_can(user, 'tally_check_edit')) or has_role(user, 'super_admin') %}
   <div class="actions">
-    {% if role_can(user, 'page_tally_check') and role_can(user, 'tally_check_edit') %}
+    {% if app_mode != 'lite' and role_can(user, 'page_tally_check') and role_can(user, 'tally_check_edit') %}
     <a class="button" href="/tally-check">Tally Check</a>
     {% endif %}
     {% if has_role(user, 'super_admin') %}
@@ -20,6 +20,7 @@
 </section>
 
 {% if error and not open_settings %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if app_mode == 'lite' %}<div class="alert warn">Tally runs at Setuora Master. Configure the connection under <a href="/master-connection">Master connection</a>; configure Tally on the Master server.</div>{% endif %}
 
 <div class="section-title">
   <h2>Companies</h2>
@@ -93,6 +94,7 @@
     {% if error and open_settings %}<div class="alert error">{{ error }}</div>{% endif %}
     <form method="post" action="/settings" class="stack" data-autosave="/settings/autosave">
       <label>Company name<input name="company_name" value="{{ settings.company_name }}" required></label>
+      {% if app_mode != 'lite' %}
       <label class="checkline">
         <input type="checkbox" name="tally_purchase_enabled" value="true" data-no-autosave {{ 'checked' if settings.tally_purchase_enabled == 'true' else '' }}>
         Automatically sync completed purchases with Tally
@@ -102,6 +104,7 @@
         Automatically sync completed sales with Tally
       </label>
       <small class="muted">Sync choices are saved only with the button below; enabled pending syncs retry in the background.</small>
+      {% endif %}
       <div class="two-col">
         <label>Tally host<input name="tally_host" value="{{ settings.tally_host }}" required></label>
         <label>Tally port<input name="tally_port" type="number" min="1" max="65535" value="{{ settings.tally_port }}" required></label>

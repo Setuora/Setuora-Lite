@@ -99,9 +99,7 @@ def _write_env(updates: dict[str, str]) -> None:
     if pending:
         if output and output[-1]:
             output.append("")
-        output.extend(
-            f"{key}={_format_env_value(value)}" for key, value in pending.items()
-        )
+        output.extend(f"{key}={_format_env_value(value)}" for key, value in pending.items())
     ENV_PATH.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
     if sys.platform == "win32":
         _run(
@@ -134,20 +132,14 @@ def _environment_issues(
     if secret in PLACEHOLDER_SECRETS or len(secret) < 32:
         issues.append("APP_SECRET_KEY must contain at least 32 random characters.")
     password = values.get("BOOTSTRAP_ADMIN_PASSWORD", "")
-    if not has_application_data and (
-        password in UNSAFE_PASSWORDS or len(password) < 12
-    ):
-        issues.append(
-            "BOOTSTRAP_ADMIN_PASSWORD must be unique and at least 12 characters."
-        )
+    if not has_application_data and (password in UNSAFE_PASSWORDS or len(password) < 12):
+        issues.append("BOOTSTRAP_ADMIN_PASSWORD must be unique and at least 12 characters.")
     if values.get("SETUORA_APP_MODE", "lite").strip().lower() != "lite":
         issues.append("SETUORA_APP_MODE must be lite.")
     if values.get("SESSION_COOKIE_SECURE", "false").strip().lower() != "false":
         issues.append("SESSION_COOKIE_SECURE must be false for the Windows HTTP pilot.")
     trusted_hosts = {
-        item.strip().lower()
-        for item in values.get("TRUSTED_HOSTS", "").split(",")
-        if item.strip()
+        item.strip().lower() for item in values.get("TRUSTED_HOSTS", "").split(",") if item.strip()
     }
     if not {"localhost", "127.0.0.1"}.issubset(trusted_hosts):
         issues.append("TRUSTED_HOSTS must include localhost and 127.0.0.1.")
@@ -170,9 +162,7 @@ def _environment_issues(
 
 def _prompt_secret(label: str) -> str:
     if not sys.stdin.isatty():
-        raise DeploymentError(
-            f"{label} is missing. Set it in .env before non-interactive setup."
-        )
+        raise DeploymentError(f"{label} is missing. Set it in .env before non-interactive setup.")
     first = getpass.getpass(f"{label}: ").strip()
     second = getpass.getpass(f"Confirm {label}: ").strip()
     if first != second:
@@ -213,7 +203,8 @@ def _prepare_environment() -> None:
             "SESSION_COOKIE_SECURE": "false",
             "TRUSTED_HOSTS": ",".join(sorted(trusted_hosts)),
             "SETUORA_WEB_PORT": values.get("SETUORA_WEB_PORT") or "8000",
-            "MASTER_SYNC_ENABLED": "false",
+            "MASTER_SYNC_ENABLED": values.get("MASTER_SYNC_ENABLED") or "false",
+            "SFTP_SYNC_ENABLED": "false",
         }
     )
     _write_env(updates)
@@ -298,9 +289,7 @@ def _wait_for_health(timeout_seconds: int = 120) -> None:
         except (OSError, ValueError, urllib.error.URLError):
             pass
         time.sleep(2)
-    raise DeploymentError(
-        f"Setuora Lite did not become healthy at {url}. Run `setuora.ps1 logs`."
-    )
+    raise DeploymentError(f"Setuora Lite did not become healthy at {url}. Run `setuora.ps1 logs`.")
 
 
 def _has_application_data() -> bool:
@@ -336,7 +325,7 @@ def setup(_args: argparse.Namespace) -> None:
     host = os.getenv("COMPUTERNAME", "this-server")
     print("Setuora Lite is healthy on Windows.")
     print(f"Open http://{host}:8000 from the franchise private LAN.")
-    print("Configure Tally and Master SFTP from Admin -> Tally SFTP.")
+    print("Configure the Master HTTPS connection from Admin -> Master connection.")
 
 
 def start(_args: argparse.Namespace) -> None:
@@ -349,7 +338,7 @@ def start(_args: argparse.Namespace) -> None:
 def stop(_args: argparse.Namespace) -> None:
     _check_windows()
     _task("/End", "/TN", TASK_NAME, check=False)
-    print("Setuora Lite stopped. The database and SFTP state were preserved.")
+    print("Setuora Lite stopped. The database and Master event queue were preserved.")
 
 
 def status(_args: argparse.Namespace) -> None:
@@ -383,9 +372,7 @@ def update(_args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Deploy Setuora Lite natively on Windows."
-    )
+    parser = argparse.ArgumentParser(description="Deploy Setuora Lite natively on Windows.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for name, function, help_text in (
         ("preflight", preflight, "validate Windows production configuration"),

@@ -94,16 +94,16 @@
       {% if role_can(user, 'page_stock_movement') and role_can(user, 'stock_movement_data') %}
       <a href="/stock-movement" class="{{ 'active' if request.url.path.startswith('/stock-movement') else '' }}">Stock movement</a>
       {% endif %}
-      {% set can_use_tally_check = role_can(user, 'page_tally_check') and role_can(user, 'tally_check_edit') %}
+      {% set can_use_tally_check = app_mode != 'lite' and role_can(user, 'page_tally_check') and role_can(user, 'tally_check_edit') %}
       {% if role_can(user, 'page_admin_menu') and ((role_can(user, 'page_products') and role_can(user, 'product_master')) or (role_can(user, 'page_expiry') and role_can(user, 'expiry_analytics')) or (role_can(user, 'page_settings') and role_can(user, 'settings_edit')) or can_use_tally_check or has_role(user, 'super_admin') or (role_can(user, 'page_maintenance') and role_can(user, 'backup_data')) or (role_can(user, 'page_users') and role_can(user, 'users_manage'))) %}
       <details class="nav-menu">
-        <summary class="{{ 'active' if request.url.path.startswith('/products') or request.url.path.startswith('/expiry') or request.url.path.startswith('/settings') or request.url.path.startswith('/tally-check') or request.url.path.startswith('/maintenance') or request.url.path.startswith('/users') else '' }}">Admin</summary>
+        <summary class="{{ 'active' if request.url.path.startswith('/products') or request.url.path.startswith('/expiry') or request.url.path.startswith('/settings') or request.url.path.startswith('/master-connection') or request.url.path.startswith('/tally-check') or request.url.path.startswith('/maintenance') or request.url.path.startswith('/users') else '' }}">Admin</summary>
         <div class="nav-menu__panel">
           {% if role_can(user, 'page_expiry') and role_can(user, 'expiry_analytics') %}<a href="/expiry">Expiry</a>{% endif %}
           {% if role_can(user, 'page_maintenance') and role_can(user, 'backup_data') %}<a href="/maintenance">Maintenance</a>{% endif %}
           {% if role_can(user, 'page_products') and role_can(user, 'product_master') %}<a href="/products">Products</a>{% endif %}
           {% if has_role(user, 'super_admin') %}<a href="/settings/access">Role access</a>{% endif %}
-          {% if app_mode == 'lite' and has_role(user, 'super_admin', 'admin') %}<a href="/master-connection">Tally SFTP</a>{% endif %}
+          {% if app_mode == 'lite' and has_role(user, 'super_admin', 'admin') %}<a href="/master-connection">Master connection</a>{% endif %}
           {% if role_can(user, 'page_settings') and role_can(user, 'settings_edit') %}<a href="/settings">Settings</a>{% endif %}
           {% if can_use_tally_check %}<a href="/tally-check">Tally Check</a>{% endif %}
           {% if role_can(user, 'page_users') and role_can(user, 'users_manage') %}<a href="/users">Users</a>{% endif %}

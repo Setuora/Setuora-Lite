@@ -1,56 +1,33 @@
 # Setuora Lite
 
-> Windows franchise server with gated Tally debtor/creditor synchronization.
+Setuora Lite is the local operations application at each franchise. It does not require Tally at the franchise. Each Lite installation has its own SQLite database and permanent franchise code.
 
-## Overview
-
-Setuora Lite runs on the Windows server inside each franchise. It keeps the
-franchise operations application local, talks to the local Tally gateway, and
-exchanges only debtor/creditor XML with Setuora Master through an isolated SFTP
-account.
-
-The supported deployment is Windows-native. Docker, WSL, Caddy, and Tailscale
-are not part of installation or runtime. Historical Linux/container and private
-network assets are retained under `archive/` for reference.
-
-## Architecture
+## Current architecture
 
 ```text
-Franchise Tally
-  -> Setuora Lite exports Sundry Debtors / Sundry Creditors
-  -> SFTP /inbox on the Master public endpoint
-  -> Setuora Master validates and consolidates parties
-  -> SFTP /outbox/setuora-...xml
-  -> Setuora Lite imports the XML into local Tally
-  -> SFTP /ack/<same-file-stem>.ack
-  -> Master accepts the next franchise upload
+Franchise A: Lite + local event queue ── HTTPS ──┐
+Franchise B: Lite + local event queue ── HTTPS ──┼── Setuora Master
+Franchise C: Lite + local event queue ── HTTPS ──┘       │
+                                            central database and Tally queue
+                                                        │
+                                                   one central Tally
 ```
 
-Synchronization is deliberately gated. Lite does not upload a fresh Tally
-export while Master has an XML waiting in `/outbox`, and it never creates an
-acknowledgement until Tally reports at least one created or altered master.
+Lite commits each supported inventory, transfer, receipt, or batch event locally before its background worker sends events in sequence to Master. Master authenticates each franchise with a separate node credential, records events idempotently, and provides commands that Lite polls and acknowledges. Internet loss leaves events in Lite's durable outbox for later retry. Master acceptance of an event does **not** mean its Tally voucher has completed; check voucher status on Master.
 
-## Security properties
+The former SFTP debtor/creditor exchange assumed Tally at each franchise. Its implementation remains in the repository for migration reference but is not started by the Lite application.
 
-- The franchise makes outbound SFTP connections only; no public franchise port
-  is required.
-- Every franchise receives a separate chrooted, SFTP-only Master account.
-- Lite pins the exact SHA256 SSH host-key fingerprint before sending a password.
-- Uploads use a `.part` suffix and are renamed to `.xml` only when complete.
-- Master XML is size-bounded and parsed with entity expansion disabled.
-- Exchange history is durable in SQLite and passwords are never shown in the UI.
-- The Lite web port is opened only on the Windows Private firewall profile.
+## Setup
 
-## Requirements
+1. Install Lite on a Windows server in the franchise's private LAN. The installer creates a startup task and opens the Lite web port only on the Windows Private firewall profile.
+2. Enroll a unique permanent franchise code on Master and issue that franchise's node credential.
+3. Publish Master's `/api/v1` endpoints through a reviewed HTTPS reverse proxy. Keep the Master admin console and central Tally gateway private.
+4. In Lite, open **Admin → Master connection**. Enter the same franchise code, the exact HTTPS origin, and the issued node credential. Enable background synchronization.
+5. Select **Initialize inventory** once to queue the inventory baseline, then **Sync now**. Review event delivery on Lite and Tally voucher status on Master.
 
-- Windows Server 2019+ or a current Windows 10/11 Pro machine
-- Python 3.11+ (the installer can add it with WinGet)
-- Tally Prime with the local HTTP/XML gateway enabled, normally on port `9000`
-- Outbound access to the Master public IP and SFTP port
-- The franchise code, isolated SFTP username/password, and verified Master SSH
-  host-key fingerprint
+The Lite server makes outbound HTTPS requests only. Its private web port and the central Tally port should not be forwarded from the franchise network.
 
-## Installation
+## Windows installation
 
 Build the self-extracting Windows installer:
 
@@ -58,57 +35,11 @@ Build the self-extracting Windows installer:
 py -3.11 scripts\build_client_packages.py --version 1.0.0
 ```
 
-Copy `dist\Setuora-Lite-1.0.0-windows.cmd` to the franchise server and run it
-as Administrator. It installs under
-`C:\ProgramData\Setuora\Setuora-Lite-windows`, creates a private virtual
-environment, registers a Windows startup task, creates a Private-profile
-firewall rule, and verifies the local health endpoint.
+Run `dist\Setuora-Lite-1.0.0-windows.cmd` as Administrator on the franchise server. Production files are installed under `C:\ProgramData\Setuora\Setuora-Lite-windows`. A newer installer preserves `.env`, the local database, backups, and connection settings.
 
-After signing in:
+For a source checkout, use `setuora.bat setup`, `start`, `stop`, or `update`. For a packaged installation, use the installed `setuora.ps1` for status, logs, start, and stop.
 
-1. Open **Admin → Settings** and confirm the Tally company, host, and port.
-2. Open **Admin → Tally SFTP**.
-3. Enter the permanent franchise code and the credentials issued by Master.
-4. Verify the SHA256 host-key fingerprint out of band.
-5. Enable background synchronization and select **Sync now**.
-
-### Windows source-checkout controls
-
-For a Windows source checkout used for development or direct server setup, run
-the root `setuora.bat` (not the generated release installer). Double-click it
-for a menu, or call it by path from any working directory with one of these
-commands:
-
-```bat
-setuora.bat setup
-setuora.bat start
-setuora.bat stop
-setuora.bat update
-```
-
-Run `setuora.bat setup` first; it requests Administrator approval and installs
-Python 3.11 with Windows Package Manager when needed. Setup and update elevate
-automatically, wait for the Administrator operation to finish, and report its
-result in the original menu or shell. These wrappers find the checkout's
-`deploy.py`; they are source-checkout/developer controls.
-For a production packaged
-installation, continue to use the installer procedure above and its installed
-`setuora.ps1` lifecycle script.
-
-## Operations
-
-```powershell
-$setuora = "C:\ProgramData\Setuora\Setuora-Lite-windows\setuora.ps1"
-& $setuora status
-& $setuora logs --follow
-& $setuora stop
-& $setuora start
-```
-
-Run a newer installer to update. The updater preserves `.env`, the database,
-backups, and `data\sftp-connection.env`.
-
-## Development and tests
+## Development
 
 ```powershell
 py -3.11 -m venv .venv
@@ -118,10 +49,4 @@ copy .env.example .env
 python -m pytest -q
 ```
 
-## Documentation
-
-- [Windows installation](docs/deployment/installation-guide.md)
-- [Tally and SFTP operation](docs/deployment/tally-integration-guide.md)
-- [Backup and recovery](docs/deployment/backup-restore-guide.md)
-- [Release checklist](docs/deployment/production-release-checklist.md)
-- [SFTP/Tally architecture](docs/architecture/sftp-tally-topology.md)
+See [central Tally topology](docs/architecture/central-tally-topology.md) and [installation guide](docs/deployment/installation-guide.md). The SFTP/Tally documents describe the previous franchise-Tally deployment and are not instructions for the central-Tally system.

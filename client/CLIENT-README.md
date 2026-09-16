@@ -9,10 +9,10 @@ virtual environment, registers a Windows startup task, opens the application
 port on the Private firewall profile, starts Lite, and verifies health. Docker,
 WSL, and a private-network client are not installed.
 
-Before enabling synchronization, obtain the franchise code, isolated SFTP
-username/password, Master public address/port, and verified SHA256 SSH host-key
-fingerprint. Enter these from **Admin → Tally SFTP**, together with the local
-Tally company, host, and port.
+Before enabling synchronization, obtain the permanent franchise code, a unique
+Master node credential, and the Master HTTPS origin. Enter them under
+**Admin → Master connection**, initialize inventory once, and run the first
+sync. Tally is configured and operated only on Master.
 
 Routine administration:
 
@@ -25,4 +25,4 @@ $setuora = "C:\ProgramData\Setuora\Setuora-Lite-windows\setuora.ps1"
 ```
 
 Run a newer `.cmd` installer to update. The installer preserves `.env`, the
-database, backups, and SFTP connection state.
+database, backups, and Master connection state.

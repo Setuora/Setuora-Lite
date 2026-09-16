@@ -1,11 +1,13 @@
 import asyncio
 import stat
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from app import main as lite_main
 from app.config import Settings, get_settings, save_master_connection_settings
 from app.main import create_app
 from app.routers import maintenance
@@ -16,13 +18,11 @@ def application_paths(app) -> set[str]:
     for included in app.routes:
         router = getattr(included, "original_router", None)
         if router is not None:
-            paths.update(
-                route.path for route in router.routes if hasattr(route, "path")
-            )
+            paths.update(route.path for route in router.routes if hasattr(route, "path"))
     return paths
 
 
-def test_lite_composition_owns_stock_tally_and_sftp_configuration():
+def test_lite_composition_uses_master_connection_without_local_tally_check():
     app = create_app("lite")
     paths = application_paths(app)
 
@@ -36,7 +36,10 @@ def test_lite_composition_owns_stock_tally_and_sftp_configuration():
     assert "/settings/access" in paths
 
     assert "/settings" in paths
-    assert "/tally-check" in paths
+    assert "/tally-check" not in paths
+    assert "/master-connection/settings" in paths
+    assert "/master-connection/initialize" in paths
+    assert "/master-connection/sftp-settings" not in paths
     assert "/api/v1/events" not in paths
     assert "/docs" not in paths
     assert "/openapi.json" not in paths
@@ -53,7 +56,7 @@ def test_lite_artifact_cannot_enable_master_or_direct_tally_in_production(
         create_app("legacy")
 
 
-def test_lite_exposes_local_tally_batch_operations():
+def test_lite_rejects_local_tally_batch_operations():
     app = create_app("lite")
     client = TestClient(app, raise_server_exceptions=False)
     try:
@@ -61,8 +64,7 @@ def test_lite_exposes_local_tally_batch_operations():
     finally:
         client.close()
 
-    assert response.status_code == 303
-    assert response.headers["location"] == "/login"
+    assert response.status_code == 404
 
 
 def test_lite_maintenance_controls_master_sync_worker(monkeypatch):
@@ -95,21 +97,52 @@ def test_lite_maintenance_controls_master_sync_worker(monkeypatch):
         "start_backup_worker",
         lambda _app: calls.append("start-backup"),
     )
-    request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(app_mode="lite"))
-    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(app_mode="lite")))
 
     asyncio.run(maintenance._stop_maintenance_workers(request))
     maintenance._start_maintenance_workers(request)
 
-    assert calls == [
-        "stop-master",
-        "stop-tally",
-        "stop-backup",
-        "start-master",
-        "start-tally",
-        "start-backup",
-    ]
+    assert calls == ["stop-master", "stop-backup", "start-master", "start-backup"]
+
+
+def test_lite_startup_runs_master_event_worker_without_local_tally_worker(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        lite_main,
+        "get_settings",
+        lambda: SimpleNamespace(
+            using_default_secret=False,
+            master_sync_configuration_error=None,
+        ),
+    )
+    monkeypatch.setattr(lite_main.Base.metadata, "create_all", lambda **_kwargs: None)
+    monkeypatch.setattr(lite_main, "ensure_runtime_schema", lambda: None)
+    monkeypatch.setattr(lite_main, "SessionLocal", lambda: nullcontext(object()))
+    monkeypatch.setattr(lite_main, "bootstrap", lambda _db: None)
+    monkeypatch.setattr(
+        lite_main, "start_master_sync_worker", lambda _app: calls.append("start-master")
+    )
+    monkeypatch.setattr(lite_main, "start_backup_worker", lambda _app: calls.append("start-backup"))
+    monkeypatch.setattr(
+        lite_main, "start_retry_worker", lambda _app: calls.append("unexpected-local-tally")
+    )
+
+    async def stop_master(_app):
+        calls.append("stop-master")
+
+    async def stop_backup(_app):
+        calls.append("stop-backup")
+
+    monkeypatch.setattr(lite_main, "stop_master_sync_worker", stop_master)
+    monkeypatch.setattr(lite_main, "stop_backup_worker", stop_backup)
+    app = SimpleNamespace(state=SimpleNamespace(app_mode="lite"))
+
+    async def exercise():
+        async with lite_main.lifespan(app):
+            pass
+
+    asyncio.run(exercise())
+    assert calls == ["start-master", "start-backup", "stop-master", "stop-backup"]
 
 
 def test_connected_lite_disables_destructive_browser_recovery(monkeypatch):
@@ -117,19 +150,17 @@ def test_connected_lite_disables_destructive_browser_recovery(monkeypatch):
         maintenance,
         "get_settings",
         lambda: SimpleNamespace(
-            sftp_sync_enabled=True,
-            master_sync_enabled=False,
+            sftp_sync_enabled=False,
+            master_sync_enabled=True,
         ),
     )
-    request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(app_mode="lite"))
-    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(app_mode="lite")))
 
     with pytest.raises(HTTPException) as exc_info:
         maintenance._deny_connected_lite_destructive_maintenance(request)
 
     assert exc_info.value.status_code == 409
-    assert "SFTP exchange state" in exc_info.value.detail
+    assert "Master event queue" in exc_info.value.detail
 
 
 @pytest.mark.parametrize(
