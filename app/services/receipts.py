@@ -10,7 +10,6 @@ from app.models import Receipt, ReceiptStatus, User
 from app.services.master_sync import (
     MasterSyncError,
     enqueue_outbox_event,
-    master_sync_enabled,
 )
 
 MAX_PROOF_IMAGE_BYTES = 3 * 1024 * 1024
@@ -70,23 +69,25 @@ def create_receipt(
     db.add(receipt)
     db.flush()
     try:
-        if master_sync_enabled():
-            enqueue_outbox_event(
-                db,
-                event_type="RECEIPT_SUBMITTED",
-                aggregate_type="RECEIPT",
-                aggregate_id=receipt.receipt_uuid,
-                payload={
-                    "receipt_id": receipt.receipt_uuid,
-                    "receipt_date": receipt.receipt_date.isoformat(),
-                    "proof_content_type": receipt.proof_content_type,
-                    "proof_image_base64": base64.b64encode(proof_image).decode("ascii"),
-                    "utr_number": receipt.utr_number,
-                    "actor": user.username,
-                    "items": [],
-                },
-            )
+        # Receipts are Lite-only and must remain deliverable while transport
+        # is paused. Persist proof and its outbox event in the same transaction.
+        enqueue_outbox_event(
+            db,
+            event_type="RECEIPT_SUBMITTED",
+            aggregate_type="RECEIPT",
+            aggregate_id=receipt.receipt_uuid,
+            payload={
+                "receipt_id": receipt.receipt_uuid,
+                "receipt_date": receipt.receipt_date.isoformat(),
+                "proof_content_type": receipt.proof_content_type,
+                "proof_image_base64": base64.b64encode(proof_image).decode("ascii"),
+                "utr_number": receipt.utr_number,
+                "actor": user.username,
+                "items": [],
+            },
+        )
     except MasterSyncError as exc:
+        db.rollback()
         raise ReceiptError(str(exc)) from exc
     db.commit()
     db.refresh(receipt)

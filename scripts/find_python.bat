@@ -4,6 +4,13 @@ rem in the caller's existing setlocal scope.
 set "PYTHON_EXE="
 set "PYTHON_ARGS="
 
+if exist "%~dp0..\.venv\Scripts\python.exe" (
+    "%~dp0..\.venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
+    if not errorlevel 1 (
+        set "PYTHON_EXE=%~dp0..\.venv\Scripts\python.exe"
+        exit /b 0
+    )
+)
 py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON_EXE=py"

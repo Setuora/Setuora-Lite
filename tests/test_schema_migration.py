@@ -6,6 +6,21 @@ from app.models import Batch, BatchItem, Product, Serial, StorageLocation, User
 from app.services.schema import _rebuild_sqlite_inventory_tables, ensure_runtime_schema
 
 
+def test_runtime_schema_adds_nullable_batch_discount_without_changing_legacy_rows(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-discounts.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE batches (id INTEGER PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE batch_items (id INTEGER PRIMARY KEY, rate FLOAT)"))
+        connection.execute(text("INSERT INTO batch_items (id, rate) VALUES (1, 125)"))
+
+    ensure_runtime_schema(engine)
+    ensure_runtime_schema(engine)
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT rate, sales_discount_rate FROM batch_items WHERE id = 1")
+        ).one() == (125, None)
+
+
 def test_runtime_schema_adds_sale_gst_columns_to_batches(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy-gst.db'}")
     with engine.begin() as connection:
@@ -198,6 +213,7 @@ def test_inventory_table_rebuild_preserves_rows_and_adds_all_foreign_keys(tmp_pa
                 serial_id=serial.id,
                 shelf_location_id=location.id,
                 shelf_verified_by_id=user.id,
+                sales_discount_rate=12.5,
             )
         )
         db.commit()
@@ -221,6 +237,7 @@ def test_inventory_table_rebuild_preserves_rows_and_adds_all_foreign_keys(tmp_pa
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT count(*) FROM serials")) == 1
         assert connection.scalar(text("SELECT count(*) FROM batch_items")) == 1
+        assert connection.scalar(text("SELECT sales_discount_rate FROM batch_items")) == 12.5
         assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
 
     assert {"product_id", "replaced_by_id", "label_printed_by_id", "location_id"} <= serial_foreign_keys

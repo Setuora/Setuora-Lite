@@ -1,6 +1,7 @@
 from datetime import timedelta
 import hashlib
 from io import BytesIO
+from http.client import IncompleteRead
 import json
 from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
@@ -17,6 +18,7 @@ from app.models import (
     BatchType,
     LocalTransfer,
     MasterInboxCommand,
+    MasterInboxStatus,
     MasterOutboxEvent,
     MasterOutboxStatus,
     Product,
@@ -39,6 +41,7 @@ from app.services.inventory import (
     create_batch,
     generate_serials,
 )
+from app.services.voucher import calculate_voucher_summary
 
 
 def _settings(**overrides):
@@ -197,6 +200,7 @@ def test_batch_event_is_transactional_and_contains_complete_immutable_snapshot(
     assert line["product_code"] == product.product_code
     assert line["hsn"] == "2106"
     assert line["gst_rate"] == 18
+    assert line["sales_discount_rate"] == 2
     assert line["serial_number"] == serial.serial_number
     assert line["status"] == SerialStatus.SOLD.value
     assert line["warehouse"] == "MAIN"
@@ -504,7 +508,7 @@ def test_blank_connection_credential_preserves_stored_secret(
     response = lite_sync_router.update_master_connection_settings(
         _request(user.id, "/master-connection/settings", app_mode="lite"),
         franchise_code="BLR-01",
-        master_url="https://setuora-master.example.com",
+        master_url="https://master.example",
         master_api_key="",
         master_sync_enabled=None,
         master_sync_interval_seconds="30",
@@ -651,7 +655,6 @@ def test_oversized_batch_submission_rolls_back_stock_and_outbox(
 ):
     settings = _settings()
     monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
-    monkeypatch.setattr(batches_router, "get_settings", lambda: settings)
     _initialize_empty_node(db_session)
     user, _product_row, serial, batch = _sale_batch(
         db_session,
@@ -1086,9 +1089,11 @@ def test_batch_delivery_updates_exact_originating_batch_status(
     assert batch.last_error is None
 
 
+@pytest.mark.parametrize("lose_first_ack", [True, False])
 def test_command_poll_accepts_master_response_wrapper_and_uses_exact_ack_body(
     db_session,
     monkeypatch,
+    lose_first_ack,
 ):
     settings = _settings(franchise_code="DEST-01")
     monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
@@ -1143,11 +1148,20 @@ def test_command_poll_accepts_master_response_wrapper_and_uses_exact_ack_body(
         assert request.get_method() == "PATCH"
         assert json.loads(request.data) == {"acknowledged": True}
         assert request.full_url.endswith(f"/api/v1/commands/{command_id}")
+        if lose_first_ack and len(calls) == 2:
+            raise URLError("connection lost before acknowledgement")
         return _Response(status=200)
 
+    if lose_first_ack:
+        with pytest.raises(master_sync.MasterSyncError, match="connection lost"):
+            master_sync.poll_master_commands(db_session, opener=opener)
+        assert db_session.scalar(select(MasterInboxCommand)).status == MasterInboxStatus.APPLIED.value
     assert master_sync.poll_master_commands(db_session, opener=opener) == 1
-    assert [request.get_method() for request in calls] == ["GET", "PATCH"]
+    assert [request.get_method() for request in calls] == ["GET", "PATCH"] * (
+        2 if lose_first_ack else 1
+    )
     assert db_session.scalar(select(func.count(MasterInboxCommand.id))) == 1
+    assert db_session.scalar(select(MasterInboxCommand)).attempts == 1
     assert db_session.scalar(select(func.count(LocalTransfer.id))) == 1
 
 
@@ -1184,11 +1198,13 @@ def test_lite_serials_are_globally_namespaced_and_misconfiguration_is_clear(
         generate_serials(db_session, product, 1)
 
 
+@pytest.mark.parametrize("transport_enabled", [True, False])
 def test_empty_initialization_queues_heartbeat_before_qr_assignment_snapshot(
     db_session,
     monkeypatch,
+    transport_enabled,
 ):
-    settings = _settings()
+    settings = _settings(master_sync_enabled=transport_enabled)
     monkeypatch.setattr(config_module, "get_settings", lambda: settings)
     monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
     monkeypatch.setattr(inventory_service, "get_settings", lambda: settings)
@@ -1414,10 +1430,15 @@ def test_initial_inventory_snapshot_must_be_the_first_outbox_event(
         master_sync.enqueue_initial_inventory_snapshot(db_session, actor=user)
 
 
-def test_lite_submit_uses_local_tally_without_node_initialization(
+@pytest.mark.parametrize("transport_enabled", [True, False])
+def test_lite_submit_requires_initialization_even_when_transport_is_paused(
     db_session,
     monkeypatch,
+    transport_enabled,
 ):
+    monkeypatch.setattr(
+        master_sync, "get_settings", lambda: _settings(master_sync_enabled=transport_enabled)
+    )
     queue_calls: list[str] = []
     monkeypatch.setattr(
         batches_router,
@@ -1439,12 +1460,13 @@ def test_lite_submit_uses_local_tally_without_node_initialization(
         db_session,
     )
 
-    assert response.status_code == 303
-    assert queue_calls == [batch.batch_number]
+    assert response.status_code == 400
+    assert b"Initialize inventory" in response.body
+    assert queue_calls == []
     db_session.refresh(batch)
     db_session.refresh(serial)
-    assert batch.status == BatchStatus.SUBMITTED.value
-    assert serial.status == SerialStatus.SOLD.value
+    assert batch.status == BatchStatus.DRAFT.value
+    assert serial.status == SerialStatus.IN_STOCK.value
     assert db_session.scalar(select(func.count(MasterOutboxEvent.id))) == 0
 
 
@@ -1494,10 +1516,15 @@ def test_permanent_franchise_code_change_blocks_enqueue_and_transport(
     assert db_session.scalar(select(func.count(MasterOutboxEvent.id))) == 2
 
 
-def test_submit_route_queues_direct_tally_in_lite_and_legacy_modes(
+@pytest.mark.parametrize("transport_enabled", [True, False])
+def test_submit_route_queues_master_events_in_lite_and_direct_tally_only_in_legacy(
     db_session,
     monkeypatch,
+    transport_enabled,
 ):
+    settings = _settings(master_sync_enabled=transport_enabled)
+    monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
+    _initialize_empty_node(db_session)
     queue_calls: list[str] = []
     monkeypatch.setattr(
         batches_router,
@@ -1532,12 +1559,129 @@ def test_submit_route_queues_direct_tally_in_lite_and_legacy_modes(
     )
 
     assert response.status_code == 303
-    assert queue_calls == [legacy_batch.batch_number, lite_batch.batch_number]
+    assert queue_calls == [legacy_batch.batch_number]
     db_session.refresh(lite_batch)
-    assert lite_batch.status == BatchStatus.SUBMITTED.value
+    assert lite_batch.status == BatchStatus.PENDING_SYNC.value
     event = db_session.scalar(
         select(MasterOutboxEvent).where(
             MasterOutboxEvent.aggregate_id.like(f"%:{lite_batch.batch_number}")
         )
     )
-    assert event is None
+    assert event is not None
+    assert event.status == MasterOutboxStatus.PENDING.value
+    settings.master_sync_enabled = True
+    assert master_sync.push_pending_events(
+        db_session, opener=lambda request, **_kwargs: _accepted_response(request)
+    ) == 1
+    db_session.refresh(lite_batch)
+    assert lite_batch.status == BatchStatus.SYNCED.value
+
+
+def test_distinct_franchise_codes_keep_distinct_qr_namespaces(monkeypatch):
+    prefixes = []
+    for code in ("FR_01", "FR-01"):
+        monkeypatch.setattr(inventory_service, "get_settings", lambda: _settings(franchise_code=code))
+        prefixes.append(inventory_service.franchise_serial_prefix("PRODUCT"))
+    assert prefixes == ["FR_01-PRODUCT", "FR-01-PRODUCT"]
+
+
+def test_truncated_master_response_retries_frozen_event(db_session, monkeypatch):
+    monkeypatch.setattr(master_sync, "get_settings", lambda: _settings())
+    _initialize_empty_node(db_session)
+    row = master_sync.enqueue_outbox_event(
+        db_session,
+        event_type="HEARTBEAT",
+        aggregate_type="NODE",
+        aggregate_id="interrupted-response",
+        payload={"items": []},
+    )
+    db_session.commit()
+    frozen = row.payload_json
+
+    def interrupted_response(request, **kwargs):
+        raise IncompleteRead(b'{"data":', 100)
+
+    assert master_sync.push_pending_events(db_session, opener=interrupted_response) == 0
+    assert row.status == MasterOutboxStatus.FAILED.value
+    assert row.next_attempt_at is not None
+    assert row.payload_json == frozen
+    row.next_attempt_at = utc_now() - timedelta(seconds=1)
+    db_session.commit()
+    assert master_sync.push_pending_events(
+        db_session, opener=lambda request, **_kwargs: _accepted_response(request)
+    ) == 1
+    assert row.status == MasterOutboxStatus.SENT.value
+    assert row.payload_json == frozen
+
+
+def test_unsupported_command_schema_is_rejected_before_inventory_changes(db_session):
+    with pytest.raises(master_sync.MasterSyncError, match="schema version"):
+        master_sync.apply_master_command(
+            db_session,
+            {
+                "command_id": str(uuid4()),
+                "type": "TRANSFER_AVAILABLE",
+                "schema_version": 2,
+                "payload": {},
+            },
+        )
+    assert db_session.scalar(select(func.count(LocalTransfer.id))) == 0
+    assert db_session.scalar(select(func.count(MasterInboxCommand.id))) == 0
+
+
+@pytest.mark.parametrize("discount", [0, 12.5])
+def test_submitted_discount_survives_product_edit_in_local_total_and_master_event(
+    db_session, monkeypatch, discount
+):
+    monkeypatch.setattr(master_sync, "get_settings", lambda: _settings())
+    _initialize_empty_node(db_session)
+    user, product, _serial, batch = _sale_batch(db_session)
+    product.sales_discount_rate = discount
+    db_session.commit()
+    original_total = calculate_voucher_summary(batch).final_value
+    apply_batch_statuses(db_session, batch, user)
+    db_session.commit()
+    product.sales_discount_rate = 35
+    db_session.commit()
+
+    assert calculate_voucher_summary(batch).final_value == original_total
+    event = master_sync.enqueue_batch_submitted_event(db_session, batch, user=user)
+    assert json.loads(event.payload_json)["events"][0]["items"][0]["sales_discount_rate"] == discount
+
+
+def test_conflicting_command_does_not_erase_applied_idempotency_record(db_session, monkeypatch):
+    monkeypatch.setattr(master_sync, "get_settings", lambda: _settings())
+    _initialize_empty_node(db_session)
+    command = {
+        "command_id": str(uuid4()),
+        "type": "RECEIPT_REVIEWED",
+        "schema_version": 1,
+        "payload": {"receipt_id": "already-reviewed", "status": "APPROVED"},
+    }
+    frozen_payload = master_sync.canonical_json(command["payload"])
+    row = MasterInboxCommand(
+        command_id=command["command_id"],
+        command_type=command["type"],
+        schema_version=1,
+        payload_json=frozen_payload,
+        payload_sha256=master_sync.payload_sha256(frozen_payload),
+        status=MasterInboxStatus.APPLIED.value,
+        attempts=1,
+        applied_at=utc_now(),
+    )
+    db_session.add(row)
+    db_session.commit()
+    conflicting = dict(command, payload={"receipt_id": "different-receipt", "status": "DENIED"})
+    calls = []
+
+    def conflicting_response(request, **kwargs):
+        calls.append(request)
+        return _Response(json.dumps({"data": {"commands": [conflicting]}}).encode(), status=200)
+
+    assert master_sync.poll_master_commands(db_session, opener=conflicting_response) == 0
+    assert len(calls) == 1
+    db_session.refresh(row)
+    assert row.status == MasterInboxStatus.APPLIED.value
+    assert row.payload_json == frozen_payload
+    assert master_sync.apply_master_command(db_session, command) is row
+    assert row.attempts == 1

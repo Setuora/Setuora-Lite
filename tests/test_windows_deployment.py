@@ -17,9 +17,7 @@ def test_active_deployment_is_windows_native_and_tailscale_free():
 
 def test_linux_and_old_private_network_assets_are_archived():
     assert (PROJECT_ROOT / "archive" / "linux" / "Linux — Setuora Lite.run").is_file()
-    assert (
-        PROJECT_ROOT / "archive" / "linux" / "container-deployment" / "compose.yaml"
-    ).is_file()
+    assert (PROJECT_ROOT / "archive" / "linux" / "container-deployment" / "compose.yaml").is_file()
     assert (
         PROJECT_ROOT
         / "archive"
@@ -56,50 +54,414 @@ def test_environment_writer_preserves_secret_characters(tmp_path, monkeypatch):
     assert "# keep" in env_path.read_text(encoding="utf-8")
 
 
-def test_source_checkout_batch_controller_owns_waited_elevation():
+def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     controller = (PROJECT_ROOT / "setuora.bat").read_text(encoding="utf-8")
-    setup = (PROJECT_ROOT / "scripts" / "setup.bat").read_text(encoding="utf-8")
-    update = (PROJECT_ROOT / "scripts" / "update.bat").read_text(encoding="utf-8")
-    finder = (PROJECT_ROOT / "scripts" / "find_python.bat").read_text(encoding="utf-8")
+    launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
+    finder = (PROJECT_ROOT / "scripts/find_python.bat").read_text(encoding="utf-8")
 
     assert 'set "ROOT_DIR=%~dp0"' in controller
-    assert all(
-        f'if /I "%~1"=="{command}"' in controller
-        for command in ("setup", "start", "stop", "update", "help")
+    assert "%ROOT_DIR%setuora.ps1" in controller
+    assert "%ROOT_DIR%client\\windows\\setuora.ps1" in controller
+    assert "endlocal & exit /b %EXIT_CODE%" in controller
+    assert "set /p" not in controller.lower()
+    assert "$selection = Read-Host" in launcher
+    assert "switch ($selection)" in launcher
+    assert "-Verb RunAs -Wait -PassThru" in launcher
+    assert "$process.ExitCode" in launcher
+    assert "SETUORA_ELEVATED_LOG" not in launcher
+    assert "RedirectStandardOutput" not in launcher
+    assert "No action was completed" in launcher
+    assert "if ($PauseAfter)" in launcher
+    assert (
+        '$Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime"'
+        in launcher
     )
-    assert "Setup / repair" in controller
-    assert "Invalid choice" in controller
-    assert "completed successfully" in controller
-    assert "-Verb RunAs -Wait -PassThru" in controller
-    assert "$process.ExitCode" in controller
-    assert "ELEVATED_REENTRY" in controller
-    assert "if defined CLI_MODE endlocal & exit /b" not in controller
-    assert "if defined CLI_MODE goto cli_exit" in controller
-    assert ":cli_exit\nendlocal & exit /b %EXIT_CODE%" in controller
-    assert "pause\ngoto menu\n\n:cli_exit" in controller
-    assert "$env:SETUORA_CONTROLLER +" not in controller
-    assert '"%%SETUORA_CONTROLLER%%"' in controller
-    assert '"%%SETUORA_ELEVATED_LOG%%" 2>&1' in controller
-    assert "if not defined CLI_MODE goto elevation_ready\ncall :prepare_elevation_log" in controller
-    assert "%RANDOM%-%RANDOM%.log" in controller
-    assert 'type "%ELEVATED_LOG%"' in controller
-    assert 'del /q "%ELEVATED_LOG%"' in controller
-    assert controller.index('set "ELEVATED_EXIT_CODE=%ERRORLEVEL%"') < controller.index(
-        'type "%ELEVATED_LOG%"'
+    for action in (
+        "open",
+        "status",
+        "logs",
+        "preflight",
+        "setup",
+        "start",
+        "stop",
+        "update",
+        "help",
+    ):
+        assert f'"{action}"' in launcher
+    assert "Show-SetuoraMenu" in launcher
+    assert "Install downloaded update" in launcher
+    assert "$ApplicationRoot\\.venv\\Scripts\\python.exe" in launcher
+    assert finder.index("..\\.venv\\Scripts\\python.exe") < finder.index("py -3.11")
+    for script_name, action in (
+        ("setup.bat", "setup"),
+        ("start_setuora.bat", "start"),
+        ("stop_setuora.bat", "stop"),
+        ("update.bat", "update"),
+    ):
+        wrapper = (PROJECT_ROOT / "scripts" / script_name).read_text(encoding="utf-8")
+        assert f'call "%~dp0..\\setuora.bat" {action} %*' in wrapper
+        assert "endlocal & exit /b %EXIT_CODE%" in wrapper
+
+
+def test_source_update_stops_before_mutating_application_files():
+    launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
+    update = launcher[
+        launcher.index("function Update-SetuoraSource") : launcher.index(
+            "function Install-SetuoraUpdate"
+        )
+    ]
+    assert "--porcelain" in update and "--untracked-files=all" in update
+    assert "--is-ancestor" in update
+    assert update.index('"fetch"') < update.index('Invoke-SetuoraDeployment "stop"')
+    assert update.index('Invoke-SetuoraDeployment "stop"') < update.index('"merge", "--ff-only"')
+    assert update.index('"merge", "--ff-only"') < update.index('Invoke-SetuoraDeployment "update"')
+
+
+def _valid_environment():
+    return {
+        "APP_SECRET_KEY": "x" * 48,
+        "BOOTSTRAP_ADMIN_PASSWORD": "unique-admin-password",
+        "SETUORA_APP_MODE": "lite",
+        "SESSION_COOKIE_SECURE": "false",
+        "TRUSTED_HOSTS": "127.0.0.1,localhost",
+        "SETUORA_WEB_PORT": "8000",
+        "AUTOMATIC_BACKUPS_ENABLED": "true",
+        "BACKUP_RETENTION_COUNT": "14",
+    }
+
+
+def test_task_registration_survives_continuous_runtime_battery_and_crashes(tmp_path, monkeypatch):
+    from xml.etree import ElementTree
+
+    runner = tmp_path / "warehouse & office" / "run-server.cmd"
+    monkeypatch.setattr(deploy, "RUNNER_PATH", runner)
+    monkeypatch.setattr(deploy, "PROJECT_ROOT", runner.parent)
+    registrations = []
+
+    def register(*arguments):
+        assert arguments[:3] == ("/Create", "/TN", deploy.TASK_NAME)
+        task_path = Path(arguments[arguments.index("/XML") + 1])
+        registrations.append(ElementTree.fromstring(task_path.read_text(encoding="utf-16")))
+
+    monkeypatch.setattr(deploy, "_task", register)
+    deploy._ensure_task()
+    task = registrations[0]
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    assert task.findtext("t:Triggers/t:BootTrigger/t:Enabled", namespaces=ns) == "true"
+    assert task.findtext("t:Principals/t:Principal/t:UserId", namespaces=ns) == "S-1-5-18"
+    for key, expected in {
+        "ExecutionTimeLimit": "PT0S",
+        "DisallowStartIfOnBatteries": "false",
+        "StopIfGoingOnBatteries": "false",
+        "MultipleInstancesPolicy": "IgnoreNew",
+        "StartWhenAvailable": "true",
+        "RestartOnFailure/Interval": "PT1M",
+        "RestartOnFailure/Count": "10",
+    }.items():
+        xpath = "t:Settings/" + "/".join(f"t:{part}" for part in key.split("/"))
+        assert task.findtext(xpath, namespaces=ns) == expected
+    assert task.findtext("t:Actions/t:Exec/t:Command", namespaces=ns) == "cmd.exe"
+    assert task.findtext("t:Actions/t:Exec/t:Arguments", namespaces=ns) == (
+        f'/d /s /c ""{runner}""'
+    )
+    assert task.findtext("t:Actions/t:Exec/t:WorkingDirectory", namespaces=ns) == str(runner.parent)
+
+
+def test_invalid_setup_and_update_fail_before_install_or_stop(tmp_path, monkeypatch):
+    import argparse
+
+    import pytest
+
+    env_path = tmp_path / ".env"
+    env_path.write_text("APP_SECRET_KEY=invalid\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "ENV_PATH", env_path)
+    monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_environment", lambda: None)
+    mutations = []
+    monkeypatch.setattr(deploy, "_install_runtime", lambda: mutations.append("install"))
+    monkeypatch.setattr(deploy, "stop", lambda _: mutations.append("stop"))
+    for operation in (deploy.setup, deploy.update):
+        with pytest.raises(deploy.DeploymentError, match="Preflight failed"):
+            operation(argparse.Namespace())
+    assert mutations == []
+
+
+def test_repair_preserves_existing_database_and_host_configuration(tmp_path, monkeypatch):
+    monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(deploy, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.setenv("COMPUTERNAME", "warehouse-pc")
+    values = _valid_environment()
+    values.update(
+        {
+            "DATABASE_URL": "sqlite:///./warehouse/custom.db",
+            "TRUSTED_HOSTS": "127.0.0.1,localhost,warehouse.example,192.168.1.50",
+            "BOOTSTRAP_ADMIN_PASSWORD": "",
+        }
+    )
+    database = tmp_path / "warehouse" / "custom.db"
+    database.parent.mkdir()
+    database.write_bytes(b"existing database content")
+    deploy._write_env(values)
+
+    def unexpected_password_prompt(_):
+        raise AssertionError("An existing database must not request another bootstrap password")
+
+    monkeypatch.setattr(deploy, "_prompt_secret", unexpected_password_prompt)
+    deploy._prepare_environment()
+    stored = deploy._read_env()[1]
+    assert stored["DATABASE_URL"] == values["DATABASE_URL"]
+    assert stored["APP_SECRET_KEY"] == values["APP_SECRET_KEY"]
+    assert {"warehouse.example", "192.168.1.50", "localhost", "127.0.0.1"}.issubset(
+        stored["TRUSTED_HOSTS"].split(",")
+    )
+    assert database.read_bytes() == b"existing database content"
+    assert deploy._has_application_data()
+
+
+def test_preflight_rejects_wrong_port_and_nonpersistent_database():
+    values = _valid_environment()
+    values.update({"SETUORA_WEB_PORT": "9000", "DATABASE_URL": "sqlite:///:memory:"})
+    issues = deploy._environment_issues(values, has_application_data=False)
+    assert "SETUORA_WEB_PORT must remain 8000 for the Windows service." in issues
+    assert "DATABASE_URL must point to a persistent SQLite database for backups." in issues
+
+
+def test_stop_waits_until_web_process_releases_port(monkeypatch):
+    import argparse
+
+    events = []
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: events.append("task-end"))
+    attempts = iter([True, False])
+
+    class OpenConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def connect(address, timeout):
+        events.append("check-port")
+        assert address == ("127.0.0.1", 8000)
+        if next(attempts):
+            return OpenConnection()
+        raise ConnectionRefusedError()
+
+    monkeypatch.setattr(deploy.socket, "create_connection", connect)
+    monkeypatch.setattr(deploy.time, "sleep", lambda _: None)
+    deploy.stop(argparse.Namespace())
+    assert events == ["task-end", "check-port", "check-port"]
+
+
+def test_stop_does_not_report_success_when_process_keeps_running(monkeypatch):
+    import argparse
+
+    import pytest
+
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: None)
+    times = iter([0, 31])
+    monkeypatch.setattr(deploy.time, "monotonic", lambda: next(times))
+    with pytest.raises(deploy.DeploymentError, match="still in use"):
+        deploy.stop(argparse.Namespace())
+
+
+def test_setup_repair_stops_existing_task_before_replacing_runtime(monkeypatch):
+    import argparse
+    import subprocess
+
+    events = []
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_environment", lambda: None)
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    monkeypatch.setattr(
+        deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
+    )
+    monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
+    monkeypatch.setattr(deploy, "_install_runtime", lambda: events.append("install"))
+    monkeypatch.setattr(deploy, "_ensure_task", lambda: None)
+    monkeypatch.setattr(deploy, "_wait_for_health", lambda: events.append("healthy"))
+    monkeypatch.setattr(deploy, "_write_env", lambda _: None)
+    if hasattr(deploy, "_configure_private_firewall"):
+        monkeypatch.setattr(deploy, "_configure_private_firewall", lambda: None)
+    deploy.setup(argparse.Namespace())
+    assert events == ["stop", "install", "healthy"]
+
+
+def test_application_reads_installer_password_escaping(tmp_path, monkeypatch):
+    import os
+
+    from app.config import _load_env_file
+
+    key = "SETUORA_DEPLOYMENT_ESCAPE_TEST"
+    for value in (
+        'Password with "quotes" and \\ slash # spaces café',
+        r"Literal\n\t\U0001f600 and escaped ending\\",
+        r"Combined slash and quote: \"",
+    ):
+        monkeypatch.delenv(key, raising=False)
+        fixture = tmp_path / "password.env"
+        fixture.write_text(f"{key}={deploy._format_env_value(value)}\n", encoding="utf-8")
+        _load_env_file(fixture)
+        assert os.environ[key] == value
+    monkeypatch.delenv(key, raising=False)
+
+
+def test_fresh_application_start_login_backup_and_restart(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    password = 'Warehouse-2026 "secure" \\ pass'
+    env_fixture = tmp_path / "bootstrap.env"
+    env_fixture.write_text(
+        f"BOOTSTRAP_ADMIN_PASSWORD={deploy._format_env_value(password)}\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "SETUORA_APP_MODE": "lite",
+            "SETUORA_ALLOW_LEGACY_TEST_MODE": "false",
+            "APP_SECRET_KEY": "isolated-startup-secret-" + "x" * 48,
+            "DATABASE_URL": f"sqlite:///{tmp_path / 'fresh.db'}",
+            "BOOTSTRAP_ADMIN_USERNAME": "warehouse-admin",
+            "BOOTSTRAP_ADMIN_PASSWORD": "",
+            "SESSION_COOKIE_SECURE": "false",
+            "TRUSTED_HOSTS": "127.0.0.1,localhost,testserver",
+            "AUTOMATIC_BACKUPS_ENABLED": "false",
+            "BACKUP_DIRECTORY": str(tmp_path / "backups"),
+            "BACKUP_SETTINGS_FILE": str(tmp_path / "backup-settings.env"),
+            "BACKUP_OFFSITE_DIRECTORY": "",
+            "MASTER_SYNC_ENABLED": "false",
+            "MASTER_CONNECTION_SETTINGS_FILE": str(tmp_path / "master-connection.env"),
+            "SFTP_SYNC_ENABLED": "false",
+            "SFTP_CONNECTION_SETTINGS_FILE": str(tmp_path / "sftp-connection.env"),
+            "SMOKE_BOOTSTRAP_ENV": str(env_fixture),
+            "SMOKE_BOOTSTRAP_PASSWORD": password,
+        }
+    )
+    script = r"""
+import os
+import sqlite3
+from pathlib import Path
+
+from app.config import _load_env_file, get_settings
+
+os.environ.pop("BOOTSTRAP_ADMIN_PASSWORD", None)
+_load_env_file(Path(os.environ["SMOKE_BOOTSTRAP_ENV"]))
+get_settings.cache_clear()
+
+from fastapi.testclient import TestClient
+from app.main import app
+from app.services.backup import create_scheduled_backup, verify_sqlite_backup
+
+for startup in range(2):
+    if startup:
+        # A repaired/restarted installation no longer retains its bootstrap password.
+        os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = ""
+        get_settings.cache_clear()
+    with TestClient(app) as client:
+        health = client.get("/health")
+        assert health.status_code == 200, health.text
+        assert health.json() == {"status": "ok", "role": os.environ["SETUORA_APP_MODE"]}
+        login_page = client.get("/login")
+        assert login_page.status_code == 200, login_page.text
+        login = client.post(
+            "/login",
+            data={
+                "username": "warehouse-admin",
+                "password": os.environ["SMOKE_BOOTSTRAP_PASSWORD"],
+            },
+            headers={"Origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        assert login.status_code == 303, login.text
+        assert "httponly" in login.headers["set-cookie"].lower()
+        home = client.get("/")
+        assert home.status_code == 200, home.text
+        backup = create_scheduled_backup()
+        verify_sqlite_backup(backup.path)
+        with sqlite3.connect(backup.path) as saved:
+            assert saved.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert saved.execute("PRAGMA foreign_key_check").fetchall() == []
+            assert saved.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 1
+print("fresh startup, login, verified backup, and restart passed")
+"""
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", script],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "fresh startup, login, verified backup, and restart passed" in result.stdout
+
+
+def test_status_checks_running_application_without_reading_admin_secrets(monkeypatch, capsys):
+    import argparse
+    import io
+    import json
+    import subprocess
+
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(
+        deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, stdout="")
     )
 
-    assert "Start-Process" not in setup
-    assert "requires Administrator privileges" in setup
-    assert "Python.Python.3.11" in setup
-    assert '"%DEPLOY_SCRIPT%" setup' in setup
-    assert "py -3.11" in finder
-    assert "%ProgramFiles%\\Python%%V\\python.exe" in finder
-    assert "%LOCALAPPDATA%\\Programs\\Python\\Python%%V\\python.exe" in finder
-    for script_name in ("setup.bat", "start_setuora.bat", "stop_setuora.bat", "update.bat"):
-        lifecycle = (PROJECT_ROOT / "scripts" / script_name).read_text(encoding="utf-8")
-        assert 'call "%SCRIPT_DIR%find_python.bat"' in lifecycle
-        assert ":find_python" not in lifecycle
+    def protected_env():
+        raise PermissionError("A regular user cannot read .env")
 
-    assert "status --porcelain --untracked-files=all" in update
-    assert "merge-base --is-ancestor" in update
-    assert "merge --ff-only" in update
+    monkeypatch.setattr(deploy, "_read_env", protected_env)
+    monkeypatch.setattr(
+        deploy.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: io.BytesIO(json.dumps({"status": "ok", "role": "lite"}).encode()),
+    )
+    deploy.status(argparse.Namespace())
+    assert "database is responding" in capsys.readouterr().out
+
+
+def test_status_reports_stopped_server_instead_of_claiming_it_is_running(monkeypatch):
+    import argparse
+    import subprocess
+
+    import pytest
+
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(
+        deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, stdout="")
+    )
+
+    def unavailable(*args, **kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(deploy.urllib.request, "urlopen", unavailable)
+    with pytest.raises(deploy.DeploymentError, match="Choose Start"):
+        deploy.status(argparse.Namespace())
+
+
+def test_start_recommends_repair_when_background_task_is_missing(monkeypatch):
+    import argparse
+    import subprocess
+
+    import pytest
+
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    calls = []
+
+    def missing_task(*args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 1, stdout="")
+
+    monkeypatch.setattr(deploy, "_task", missing_task)
+    with pytest.raises(deploy.DeploymentError, match="Choose Setup / repair"):
+        deploy.start(argparse.Namespace())
+    assert len(calls) == 1
+    assert calls[0][0] == "/Query"

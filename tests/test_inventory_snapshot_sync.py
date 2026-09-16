@@ -55,8 +55,9 @@ def _location(code: str, warehouse: str) -> StorageLocation:
     )
 
 
-def _enable_lite_sync(monkeypatch) -> None:
+def _enable_lite_sync(monkeypatch, *, transport_enabled=True) -> None:
     settings = _settings()
+    settings.master_sync_enabled = transport_enabled
     monkeypatch.setattr(config_module, "get_settings", lambda: settings)
     monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
     monkeypatch.setattr(inventory_service, "get_settings", lambda: settings)
@@ -69,11 +70,13 @@ def _initialize_empty_node(db) -> None:
     ) == (1, 0)
 
 
+@pytest.mark.parametrize("transport_enabled", [True, False])
 def test_qr_replacement_enqueues_old_and_new_serial_snapshot(
     db_session,
     monkeypatch,
+    transport_enabled,
 ):
-    _enable_lite_sync(monkeypatch)
+    _enable_lite_sync(monkeypatch, transport_enabled=transport_enabled)
     _initialize_empty_node(db_session)
     user = User(username="admin", password_hash="x", role="admin")
     product = _product()
@@ -106,11 +109,13 @@ def test_qr_replacement_enqueues_old_and_new_serial_snapshot(
     assert replacement.serial_number.startswith("FR01-")
 
 
+@pytest.mark.parametrize("transport_enabled", [True, False])
 def test_relocation_enqueues_updated_warehouse_snapshot(
     db_session,
     monkeypatch,
+    transport_enabled,
 ):
-    _enable_lite_sync(monkeypatch)
+    _enable_lite_sync(monkeypatch, transport_enabled=transport_enabled)
     _initialize_empty_node(db_session)
     user = User(username="warehouse", password_hash="x", role="warehouse_manager")
     product = _product("MOVE-1")
@@ -153,11 +158,13 @@ def test_relocation_enqueues_updated_warehouse_snapshot(
     assert payload["items"][0]["warehouse"] == destination.warehouse
 
 
+@pytest.mark.parametrize("transport_enabled", [True, False])
 def test_qr_replacement_before_initialization_rolls_back_with_clear_error(
     db_session,
     monkeypatch,
+    transport_enabled,
 ):
-    _enable_lite_sync(monkeypatch)
+    _enable_lite_sync(monkeypatch, transport_enabled=transport_enabled)
     user = User(username="preinit-admin", password_hash="x", role="admin")
     product = _product("PREINIT-REPLACE")
     old = Serial(
@@ -186,11 +193,13 @@ def test_qr_replacement_before_initialization_rolls_back_with_clear_error(
     assert db_session.scalar(select(func.count(MasterOutboxEvent.id))) == 0
 
 
+@pytest.mark.parametrize("transport_enabled", [True, False])
 def test_relocation_before_initialization_rolls_back_with_clear_error(
     db_session,
     monkeypatch,
+    transport_enabled,
 ):
-    _enable_lite_sync(monkeypatch)
+    _enable_lite_sync(monkeypatch, transport_enabled=transport_enabled)
     user = User(
         username="preinit-warehouse",
         password_hash="x",

@@ -5,31 +5,56 @@
   <div>
     <p class="eyebrow">Setuora Lite</p>
     <h1>Master connection</h1>
-    <p>Send franchise operations to Setuora Master. Tally runs at Master; this Lite server does not connect to Tally.</p>
+    <p>Connect this Lite server to your warehouse Master. Tally runs on Master.</p>
   </div>
   <form method="post" action="/master-connection/sync">
-    <button class="button primary" type="submit" {% if not sync_enabled or configuration_error %}disabled{% endif %}>Sync now</button>
+    <button class="button" type="submit" {% if not initialized or not sync_enabled or configuration_error %}disabled{% endif %}>Sync now</button>
   </form>
 </section>
 
 {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if notice %}<div class="alert warn">{{ notice }}</div>{% endif %}
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 {% if configuration_error %}<div class="alert error">{{ configuration_error }}</div>{% endif %}
-{% if not sync_enabled %}<div class="alert warn">Background Master synchronization is disabled.</div>{% endif %}
 
 <section class="panel">
-  <div class="section-title">
-    <div>
-      <h2>Franchise and Master settings</h2>
-      <p class="muted">Use the permanent franchise code and node credential issued by the Master administrator.</p>
-    </div>
-  </div>
-  <form method="post" action="/master-connection/settings" class="stack">
+  <h2>{{ connection_state }}</h2>
+  {% if initialized %}
+  <p><strong>{{ franchise_code }}</strong> &middot; {{ master_url }}</p>
+  {% if last_check %}<p class="muted">Last verified with Master: {{ last_check }}</p>{% endif %}
+  <p>{% if not sync_enabled %}New operations stay safely queued until you resume synchronization.{% elif oldest_unsent %}Your saved operations will be delivered in order. You can keep working while delivery is pending.{% else %}Setup is complete. New operations sync automatically while Master is reachable.{% endif %}</p>
+  <form method="post" action="/master-connection/settings">
+    <input type="hidden" name="franchise_code" value="{{ franchise_code }}">
+    <input type="hidden" name="master_url" value="{{ master_url }}">
+    <input type="hidden" name="master_sync_interval_seconds" value="{{ interval_seconds }}">
+    <input type="hidden" name="master_request_timeout_seconds" value="{{ request_timeout_seconds }}">
+    <input type="hidden" name="master_sync_enabled" value="{{ 'false' if sync_enabled else 'true' }}">
+    <button class="button small" type="submit">{{ 'Pause synchronization' if sync_enabled else 'Resume synchronization' }}</button>
+  </form>
+  {% else %}
+  <p>On Master, add this franchise and choose <strong>Copy connection details</strong>. Paste those details below, then connect.</p>
+  {% endif %}
+</section>
+
+{% if initialized %}<details class="panel"><summary>Update connection details</summary>{% else %}<section class="panel">{% endif %}
+  <h2>Connect to Master</h2>
+  <form method="post" action="/master-connection/connect" class="stack" data-master-connect>
+    <label>Setup details from Master
+      <textarea name="setup_details" rows="4" maxlength="8192" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the setup details copied from Master" required></textarea>
+    </label>
+    <p class="muted">Connecting checks the franchise, prepares inventory once, and starts synchronization.</p>
+    <div><button class="button primary" type="submit">Connect to Master</button></div>
+  </form>
+{% if initialized %}</details>{% else %}</section>{% endif %}
+
+<details class="panel">
+  <summary>Enter connection details manually</summary>
+  <form method="post" action="/master-connection/connect" class="stack" data-master-connect>
     <label>Franchise code
-      <input name="franchise_code" value="{{ '' if franchise_code == 'Not configured' else franchise_code }}" placeholder="BLR-01" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" autocomplete="off" required>
+      <input name="franchise_code" value="{{ '' if franchise_code == 'Not configured' else franchise_code }}" placeholder="BLR-01" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" autocomplete="off" {% if initialized %}readonly{% endif %} required>
     </label>
     <label>Master HTTPS URL
-      <input name="master_url" type="url" value="{{ master_url }}" placeholder="https://master.example.com" autocomplete="off" required>
+      <input name="master_url" type="url" value="{{ master_url }}" placeholder="https://master.example.com" autocomplete="off" {% if initialized %}readonly{% endif %} required>
     </label>
     <label>Node credential
       <span class="password-field" data-password-field>
@@ -37,31 +62,35 @@
         <button class="button small ghost" type="button" data-password-toggle aria-pressed="false">Show</button>
       </span>
     </label>
-    <div class="two-col">
+    <details>
+      <summary>Advanced connection options</summary>
+      <div class="two-col">
       <label>Sync interval (seconds)
         <input name="master_sync_interval_seconds" type="number" value="{{ interval_seconds }}" min="15" max="3600" required>
       </label>
       <label>Connection timeout (seconds)
         <input name="master_request_timeout_seconds" type="number" value="{{ request_timeout_seconds }}" min="3" max="120" required>
       </label>
-    </div>
-    <label class="checkline">
-      <input name="master_sync_enabled" type="checkbox" value="true" {% if sync_enabled %}checked{% endif %}>
-      Enable background synchronization
-    </label>
-    <div class="save-row"><button class="button primary" type="submit">Save settings</button></div>
+      </div>
+    </details>
+    <div class="save-row"><button class="button primary" type="submit">Connect to Master</button></div>
   </form>
-</section>
+</details>
 
+{% if initialized %}
+<p class="muted">Sent updates have reached Master. Check voucher processing in Tally on the Master dashboard.</p>
+
+{% if oldest_unsent and oldest_unsent.status == 'FAILED' %}
 <section class="panel">
-  <h2>First connection</h2>
-  <p>After saving a valid connection, initialize this franchise once. This queues the local inventory baseline before later events can be delivered.</p>
-  <form method="post" action="/master-connection/initialize">
-    <button class="button" type="submit" {% if not sync_enabled or configuration_error %}disabled{% endif %}>Initialize inventory</button>
+  <h2>Delivery needs attention</h2>
+  <p>Event {{ oldest_unsent.sequence }} ({{ oldest_unsent.event_type }}) must reach Master before later events can be sent.</p>
+  <p class="alert error">{{ oldest_unsent.last_error or 'Delivery failed.' }}</p>
+  {% if oldest_unsent.next_attempt_at %}<p>Another delivery attempt is scheduled automatically.</p>{% else %}<p>Resolve the reported problem, then retry this event.</p>{% endif %}
+  <form method="post" action="/master-connection/events/{{ oldest_unsent.id }}/retry">
+    <button class="button" type="submit">Retry event {{ oldest_unsent.sequence }}</button>
   </form>
 </section>
-
-<div class="alert warn">A sent event means Master accepted it. Tally voucher status is tracked on Master and may still be pending or failed.</div>
+{% endif %}
 
 <section class="metric-grid">
   <div class="metric"><span>Pending</span><strong>{{ counts.get('PENDING', 0) }}</strong></div>
@@ -92,5 +121,15 @@
     </table>
   </div>
 </section>
+{% endif %}
 <script src="/static/password-toggle.js?v=20260624-expiry-1"></script>
+<script nonce="{{ csp_nonce(request) }}">
+  document.querySelectorAll('[data-master-connect]').forEach((form) => {
+    form.addEventListener('submit', () => {
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      button.textContent = 'Connecting…';
+    });
+  });
+</script>
 {% endblock %}

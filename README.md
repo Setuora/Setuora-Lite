@@ -20,10 +20,10 @@ The former SFTP debtor/creditor exchange assumed Tally at each franchise. Its im
 ## Setup
 
 1. Install Lite on a Windows server in the franchise's private LAN. The installer creates a startup task and opens the Lite web port only on the Windows Private firewall profile.
-2. Enroll a unique permanent franchise code on Master and issue that franchise's node credential.
-3. Publish Master's `/api/v1` endpoints through a reviewed HTTPS reverse proxy. Keep the Master admin console and central Tally gateway private.
-4. In Lite, open **Admin → Master connection**. Enter the same franchise code, the exact HTTPS origin, and the issued node credential. Enable background synchronization.
-5. Select **Initialize inventory** once to queue the inventory baseline, then **Sync now**. Review event delivery on Lite and Tally voucher status on Master.
+2. Publish Master's `/api/v1` endpoints through a reviewed HTTPS reverse proxy with working DNS and a valid certificate. Keep the Master admin console and central Tally gateway private; the installers do not configure this public HTTPS access.
+3. On Master, open **Franchises** (`/franchises`) and save the public Master HTTPS address once. Add a unique permanent franchise code. Master creates the first credential automatically; select **Copy connection details** and transfer those details securely to the matching Lite.
+4. In Lite, open **Admin → Master connection** (`/master-connection`), paste the copied JSON, and select **Connect to Master**. Lite verifies the connection and franchise identity, initializes its inventory baseline once, and starts synchronization.
+5. Confirm that the baseline reached Master before staff begin work. Review event delivery on Lite and Tally voucher status on Master. Tally is installed only at Master.
 
 The Lite server makes outbound HTTPS requests only. Its private web port and the central Tally port should not be forwarded from the franchise network.
 
@@ -37,7 +37,9 @@ py -3.11 scripts\build_client_packages.py --version 1.0.0
 
 Run `dist\Setuora-Lite-1.0.0-windows.cmd` as Administrator on the franchise server. Production files are installed under `C:\ProgramData\Setuora\Setuora-Lite-windows`. A newer installer preserves `.env`, the local database, backups, and connection settings.
 
-For a source checkout, use `setuora.bat setup`, `start`, `stop`, or `update`. For a packaged installation, use the installed `setuora.ps1` for status, logs, start, and stop.
+Double-click `setuora.bat` in either a source checkout or an installed copy to open the same controls menu. Closing it leaves Setuora running. Setup, start, stop, update, and configuration checks (`preflight`) request Windows Administrator approval and show an interactive console for prompts and errors.
+
+The installed update action asks you to choose the downloaded Lite Windows `.cmd` installer. A source checkout updates through Git and requires a clean worktree and a fast-forward update. The native Windows controls require acceptance testing on the actual deployment machines.
 
 ## Development
 

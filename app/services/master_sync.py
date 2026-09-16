@@ -13,10 +13,11 @@ import json
 import re
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from http.client import HTTPException as HTTPProtocolError
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -226,6 +227,7 @@ def network_event_item(
     serial: Serial,
     *,
     rate: float | None = None,
+    sales_discount_rate: float | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
     """Flatten a product/serial snapshot to Master's strict v1 item schema."""
@@ -238,6 +240,11 @@ def network_event_item(
         "tally_stock_item_name": product.tally_stock_item_name,
         "hsn": product.hsn,
         "gst_rate": float(product.gst_rate or 0),
+        "sales_discount_rate": float(
+            product.sales_discount_rate or 0
+            if sales_discount_rate is None
+            else sales_discount_rate
+        ),
         "unit": product.unit,
         "rate": float(rate if rate is not None else product.default_rate or 0),
         "status": status or serial.status,
@@ -329,7 +336,14 @@ def enqueue_batch_submitted_event(
     payload = {
         "reference": batch.tally_reference or batch.batch_number,
         "actor": getattr(actor, "username", None),
-        "items": [network_event_item(item.serial, rate=item.rate) for item in items],
+        "items": [
+            network_event_item(
+                item.serial,
+                rate=item.rate,
+                sales_discount_rate=item.sales_discount_rate,
+            )
+            for item in items
+        ],
         "party_name": batch.party_name,
         "party_state": batch.party_state,
         "party_gst_registration_type": batch.party_gst_registration_type,
@@ -724,8 +738,9 @@ def _open_request(
     request: Request,
     *,
     opener: Callable[..., Any],
+    request_timeout: int | None = None,
 ) -> tuple[int, bytes]:
-    response = opener(request, timeout=_request_timeout())
+    response = opener(request, timeout=request_timeout or _request_timeout())
     try:
         status = getattr(response, "status", None)
         if status is None and hasattr(response, "getcode"):
@@ -740,14 +755,38 @@ def _open_request(
             close()
 
 
+class _RejectMasterRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise MasterSyncError(
+            "Master redirected the connection. Use the exact Master HTTPS address supplied by its administrator."
+        )
+
+
+def _master_urlopen(request: Request, *, timeout: int):
+    # Node credentials are restricted to the explicitly configured HTTPS origin.
+    return build_opener(_RejectMasterRedirects()).open(request, timeout=timeout)
+
+
 def verify_master_enrollment_identity(
     *,
     opener: Callable[..., Any] | None = None,
+    franchise_code: str | None = None,
+    master_url: str | None = None,
+    api_key: str | None = None,
+    min_last_sequence: int = 0,
+    max_last_sequence: int = 0,
+    request_timeout: int | None = None,
 ) -> dict[str, Any]:
-    """Require an exact, unused Master node before UI baseline initialization."""
+    """Verify an unused node, or the bounded cursor of an existing installation.
 
-    expected_code = configured_franchise_code(required=True)
-    master_url, api_key = _master_credentials()
+    Proposed credentials can be checked before they replace the saved connection.
+    """
+
+    expected_code = franchise_code or configured_franchise_code(required=True)
+    if master_url is None or api_key is None:
+        saved_url, saved_key = _master_credentials()
+        master_url = master_url if master_url is not None else saved_url
+        api_key = api_key if api_key is not None else saved_key
     request = Request(
         f"{master_url}/api/v1/node",
         method="GET",
@@ -759,7 +798,8 @@ def verify_master_enrollment_identity(
     try:
         status, body = _open_request(
             request,
-            opener=opener or urlopen,
+            opener=opener or _master_urlopen,
+            request_timeout=request_timeout,
         )
     except (
         HTTPError,
@@ -767,6 +807,7 @@ def verify_master_enrollment_identity(
         TimeoutError,
         ConnectionError,
         OSError,
+        HTTPProtocolError,
     ) as exc:
         raise MasterSyncError(_safe_error(exc, api_key=api_key)) from exc
     if not 200 <= status < 300:
@@ -793,11 +834,16 @@ def verify_master_enrollment_identity(
         )
     if type(last_sequence) is not int or type(next_sequence) is not int:
         raise MasterSyncError("Master returned a malformed GET /api/v1/node response.")
-    if last_sequence != 0 or next_sequence != 1:
+    if min_last_sequence == 0 and max_last_sequence == 0 and (last_sequence != 0 or next_sequence != 1):
         raise MasterSyncError(
             f"Master node {expected_code} is not empty (expected cursor 0/1, "
             f"returned {last_sequence}/{next_sequence}). Inventory "
             "initialization was blocked."
+        )
+    if not min_last_sequence <= last_sequence <= max_last_sequence or next_sequence != last_sequence + 1:
+        raise MasterSyncError(
+            "Master's inventory history does not match this Lite installation. "
+            "Ask the administrator to check the franchise connection before continuing."
         )
     return data
 
@@ -875,7 +921,7 @@ def push_pending_events(
         return 0
     require_initial_inventory_queued(db)
     master_url, api_key = _master_credentials()
-    open_url = opener or urlopen
+    open_url = opener or _master_urlopen
     sent_count = 0
 
     while sent_count < limit:
@@ -957,7 +1003,7 @@ def push_pending_events(
                 error_message=error_message,
             )
             break
-        except (URLError, TimeoutError, ConnectionError, OSError) as exc:
+        except (URLError, TimeoutError, ConnectionError, OSError, HTTPProtocolError) as exc:
             _fail_outbox_event(db, event, exc, api_key=api_key, retryable=True)
             break
         except Exception as exc:
@@ -1035,6 +1081,10 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
     """Apply one command in the caller's database transaction."""
 
     command_id, command_type, schema_version, payload = _command_parts(command)
+    if schema_version != COMMAND_SCHEMA_VERSION:
+        raise MasterSyncError(
+            f"Unsupported Master command schema version: {schema_version}."
+        )
     frozen_payload = canonical_json(payload)
     frozen_hash = payload_sha256(frozen_payload)
     row = db.scalar(select(MasterInboxCommand).where(MasterInboxCommand.command_id == command_id))
@@ -1118,6 +1168,10 @@ def _persist_failed_command(
             payload_sha256=frozen_hash,
         )
         db.add(row)
+    elif row.status == MasterInboxStatus.APPLIED.value:
+        # A conflicting replay must not erase durable proof that the original
+        # command already changed inventory. Its original replay remains a no-op.
+        return
     row.status = MasterInboxStatus.FAILED.value
     row.attempts = int(row.attempts or 0) + 1
     row.last_error = _safe_error(exc)
@@ -1136,7 +1190,7 @@ def poll_master_commands(
         return 0
     require_initial_inventory_queued(db)
     master_url, api_key = _master_credentials()
-    open_url = opener or urlopen
+    open_url = opener or _master_urlopen
     query = urlencode({"limit": limit})
     request = Request(
         f"{master_url}/api/v1/commands?{query}",
@@ -1150,7 +1204,7 @@ def poll_master_commands(
         status, body = _open_request(request, opener=open_url)
         if not 200 <= status < 300:
             raise HTTPError(request.full_url, status, "Master rejected command poll", {}, None)
-    except (HTTPError, URLError, OSError, TimeoutError, RuntimeError) as exc:
+    except (HTTPError, URLError, OSError, TimeoutError, RuntimeError, HTTPProtocolError) as exc:
         raise MasterSyncError(_safe_error(exc, api_key=api_key)) from exc
 
     decoded = _decode_json_response(body)
@@ -1203,7 +1257,7 @@ def poll_master_commands(
                     {},
                     None,
                 )
-        except (HTTPError, URLError, OSError, TimeoutError, RuntimeError) as exc:
+        except (HTTPError, URLError, OSError, TimeoutError, RuntimeError, HTTPProtocolError) as exc:
             raise MasterSyncError(_safe_error(exc, api_key=api_key)) from exc
         applied_count += 1
 

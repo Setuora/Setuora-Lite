@@ -8,13 +8,16 @@ import json
 import os
 import re
 import secrets
+import socket
 import subprocess  # nosec B404
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
 import venv
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 ENV_PATH = PROJECT_ROOT / ".env"
@@ -128,6 +131,9 @@ def _environment_issues(
     has_application_data: bool,
 ) -> list[str]:
     issues: list[str] = []
+    database_url = values.get("DATABASE_URL") or "sqlite:///./data/setuora.db"
+    if not database_url.startswith("sqlite:///") or database_url == "sqlite:///:memory:":
+        issues.append("DATABASE_URL must point to a persistent SQLite database for backups.")
     secret = values.get("APP_SECRET_KEY", "")
     if secret in PLACEHOLDER_SECRETS or len(secret) < 32:
         issues.append("APP_SECRET_KEY must contain at least 32 random characters.")
@@ -183,7 +189,7 @@ def _prepare_environment() -> None:
         or len(values.get("APP_SECRET_KEY", "")) < 32
     ):
         updates["APP_SECRET_KEY"] = secrets.token_urlsafe(48)
-    database_exists = (PROJECT_ROOT / "data" / "setuora.db").is_file()
+    database_exists = _has_application_data()
     password = values.get("BOOTSTRAP_ADMIN_PASSWORD", "")
     if not database_exists and (password in UNSAFE_PASSWORDS or len(password) < 12):
         password = _prompt_secret("First administrator password")
@@ -193,13 +199,15 @@ def _prepare_environment() -> None:
             )
         updates["BOOTSTRAP_ADMIN_PASSWORD"] = password
     computer_name = os.getenv("COMPUTERNAME", "").strip().lower()
-    trusted_hosts = {"127.0.0.1", "localhost"}
+    trusted_hosts = {
+        item.strip().lower() for item in values.get("TRUSTED_HOSTS", "").split(",") if item.strip()
+    } | {"127.0.0.1", "localhost"}
     if computer_name:
         trusted_hosts.add(computer_name)
     updates.update(
         {
             "SETUORA_APP_MODE": "lite",
-            "DATABASE_URL": "sqlite:///./data/setuora.db",
+            "DATABASE_URL": values.get("DATABASE_URL") or "sqlite:///./data/setuora.db",
             "SESSION_COOKIE_SECURE": "false",
             "TRUSTED_HOSTS": ",".join(sorted(trusted_hosts)),
             "SETUORA_WEB_PORT": values.get("SETUORA_WEB_PORT") or "8000",
@@ -237,27 +245,46 @@ def _task(*arguments: str, check: bool = True, capture: bool = False):
     return _run(["schtasks.exe", *arguments], check=check, capture=capture)
 
 
+def _task_xml() -> str:
+    # Defaults stop a task after 72 hours and when a PC switches to battery.
+    # Register explicit settings suitable for a continuously running server.
+    return f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers><BootTrigger>
+    <Enabled>true</Enabled><ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+  </BootTrigger></Triggers>
+  <Principals><Principal id="System">
+    <UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel>
+  </Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>10</Count></RestartOnFailure>
+  </Settings>
+  <Actions Context="System"><Exec>
+    <Command>cmd.exe</Command>
+    <Arguments>{escape(f'/d /s /c ""{RUNNER_PATH}""')}</Arguments>
+    <WorkingDirectory>{escape(str(PROJECT_ROOT))}</WorkingDirectory>
+  </Exec></Actions>
+</Task>
+"""
+
+
 def _ensure_task() -> None:
-    _task(
-        "/Create",
-        "/TN",
-        TASK_NAME,
-        "/SC",
-        "ONSTART",
-        "/RU",
-        "SYSTEM",
-        "/RL",
-        "HIGHEST",
-        "/TR",
-        str(RUNNER_PATH),
-        "/F",
-    )
+    with tempfile.TemporaryDirectory(prefix="setuora-task-") as directory:
+        task_path = Path(directory) / "task.xml"
+        task_path.write_text(_task_xml(), encoding="utf-16")
+        _task("/Create", "/TN", TASK_NAME, "/XML", str(task_path), "/F")
 
 
 def _configure_private_firewall() -> None:
     _, values = _read_env()
     port = values.get("SETUORA_WEB_PORT", "8000")
     script = (
+        "$ErrorActionPreference='Stop'; "
         f"$existing=Get-NetFirewallRule -Name '{FIREWALL_RULE_NAME}' "
         "-ErrorAction SilentlyContinue; if ($existing) { Remove-NetFirewallRule "
         f"-Name '{FIREWALL_RULE_NAME}' }}; New-NetFirewallRule -Name "
@@ -292,8 +319,33 @@ def _wait_for_health(timeout_seconds: int = 120) -> None:
     raise DeploymentError(f"Setuora Lite did not become healthy at {url}. Run `setuora.ps1 logs`.")
 
 
+def _wait_for_stop(timeout_seconds: int = 30) -> None:
+    # Do not replace runtime files while the scheduled process still owns the port.
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", 8000), timeout=1):
+                pass
+        except ConnectionRefusedError:
+            return
+        except OSError:
+            pass
+        time.sleep(0.5)
+    raise DeploymentError(
+        "Port 8000 is still in use after stopping the task. "
+        "Check the running Setuora process before updating files."
+    )
+
+
 def _has_application_data() -> bool:
-    return (PROJECT_ROOT / "data" / "setuora.db").is_file()
+    _, values = _read_env()
+    url = values.get("DATABASE_URL") or "sqlite:///./data/setuora.db"
+    if not url.startswith("sqlite:///"):
+        return False
+    database_path = Path(url.removeprefix("sqlite:///"))
+    if not database_path.is_absolute():
+        database_path = PROJECT_ROOT / database_path
+    return database_path.is_file()
 
 
 def preflight(_args: argparse.Namespace) -> None:
@@ -316,6 +368,9 @@ def preflight(_args: argparse.Namespace) -> None:
 def setup(_args: argparse.Namespace) -> None:
     _check_windows()
     _prepare_environment()
+    preflight(_args)
+    if _task("/Query", "/TN", TASK_NAME, check=False, capture=True).returncode == 0:
+        stop(_args)
     _install_runtime()
     _configure_private_firewall()
     _ensure_task()
@@ -330,6 +385,12 @@ def setup(_args: argparse.Namespace) -> None:
 
 def start(_args: argparse.Namespace) -> None:
     _check_windows()
+    preflight(_args)
+    task = _task("/Query", "/TN", TASK_NAME, check=False, capture=True)
+    if task.returncode != 0:
+        raise DeploymentError(
+            "The Setuora background task is missing. Choose Setup / repair first."
+        )
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     print("Setuora Lite is running.")
@@ -338,13 +399,28 @@ def start(_args: argparse.Namespace) -> None:
 def stop(_args: argparse.Namespace) -> None:
     _check_windows()
     _task("/End", "/TN", TASK_NAME, check=False)
+    _wait_for_stop()
     print("Setuora Lite stopped. The database and Master event queue were preserved.")
 
 
 def status(_args: argparse.Namespace) -> None:
     _check_windows()
-    _task("/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST")
-    print("Health: http://127.0.0.1:8000/health")
+    task = _task("/Query", "/TN", TASK_NAME, "/FO", "LIST", check=False, capture=True)
+    if task.returncode == 0 and task.stdout.strip():
+        print(task.stdout.strip())
+    url = "http://127.0.0.1:8000/health"
+    try:
+        with urllib.request.urlopen(url, timeout=3) as response:  # nosec B310
+            payload = json.load(response)
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        raise DeploymentError(
+            "Setuora Lite is not responding. Choose Start, or Setup / repair for a new installation. "
+            "If Start fails, choose View recent logs."
+        ) from exc
+    if payload != {"status": "ok", "role": "lite"}:
+        raise DeploymentError("Port 8000 is being used by a different application.")
+    print("Setuora Lite is running and its database is responding.")
+    print("Open http://127.0.0.1:8000 in your browser.")
 
 
 def logs(args: argparse.Namespace) -> None:
@@ -363,6 +439,7 @@ def update(_args: argparse.Namespace) -> None:
     _check_windows()
     if not ENV_PATH.exists():
         raise DeploymentError("Run `setuora.ps1 setup` first.")
+    preflight(_args)
     stop(_args)
     _install_runtime()
     _configure_private_firewall()
@@ -395,7 +472,7 @@ def main() -> int:
     args = build_parser().parse_args()
     try:
         args.function(args)
-    except (DeploymentError, subprocess.CalledProcessError) as exc:
+    except (DeploymentError, subprocess.CalledProcessError, OSError) as exc:
         print(f"Deployment failed: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

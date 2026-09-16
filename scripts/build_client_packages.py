@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = PROJECT_ROOT / "dist"
 RELEASE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 COMMON_FILES = (
+    "setuora.bat",
     ".env.example",
     "deploy.py",
     "requirements-runtime.lock",
@@ -48,9 +49,7 @@ def _validate_payload(payload: dict[str, Path]) -> None:
     forbidden = {".env", ".git", "data", "archive", "__pycache__"}
     for archive_name, source in payload.items():
         if set(PurePosixPath(archive_name).parts) & forbidden:
-            raise ValueError(
-                f"Refusing to package private or archived path: {archive_name}"
-            )
+            raise ValueError(f"Refusing to package private or archived path: {archive_name}")
         if not source.is_file():
             raise FileNotFoundError(source)
 

@@ -358,7 +358,6 @@ def relocate_stock(
 
         if (
             get_settings().app_mode == "lite"
-            and get_settings().master_sync_enabled
             and moved_serials
         ):
             db.flush()

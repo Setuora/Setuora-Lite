@@ -472,6 +472,7 @@ class BatchItem(Base):
     serial_id: Mapped[int] = mapped_column(ForeignKey("serials.id"))
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sales_discount_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     fefo_picked: Mapped[bool] = mapped_column(Boolean, default=False)
     shelf_location_id: Mapped[int | None] = mapped_column(

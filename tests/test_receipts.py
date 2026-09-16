@@ -29,8 +29,10 @@ def _settings():
     )
 
 
-def _initialize_sync(db, monkeypatch):
-    monkeypatch.setattr(master_sync, "get_settings", _settings)
+def _initialize_sync(db, monkeypatch, *, transport_enabled=True):
+    settings = _settings()
+    settings.master_sync_enabled = transport_enabled
+    monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
     master_sync.enqueue_initial_inventory_snapshot(
         db, actor=SimpleNamespace(username="initializer")
     )
@@ -42,10 +44,14 @@ def _initialize_sync(db, monkeypatch):
     )
     marker.status = MasterOutboxStatus.SENT.value
     db.commit()
+    return settings
 
 
-def test_receipt_is_queued_and_master_decision_is_applied(db_session, monkeypatch):
-    _initialize_sync(db_session, monkeypatch)
+@pytest.mark.parametrize("transport_enabled", [True, False])
+def test_receipt_is_queued_and_master_decision_is_applied(
+    db_session, monkeypatch, transport_enabled
+):
+    settings = _initialize_sync(db_session, monkeypatch, transport_enabled=transport_enabled)
     user = User(username="sales-user", password_hash="x", role="sales")
     db_session.add(user)
     db_session.commit()
@@ -102,6 +108,7 @@ def test_receipt_is_queued_and_master_decision_is_applied(db_session, monkeypatc
             ).encode()
         )
 
+    settings.master_sync_enabled = True
     assert master_sync.push_pending_events(db_session, opener=accept) == 1
     db_session.refresh(receipt)
     assert receipt.synced_at is not None
@@ -145,3 +152,24 @@ def test_receipt_rejects_non_image_proof(db_session, monkeypatch):
         )
 
     assert db_session.scalar(select(Receipt)) is None
+
+
+def test_receipt_without_initialization_rolls_back_proof_and_outbox(db_session, monkeypatch):
+    settings = _settings()
+    settings.master_sync_enabled = False
+    monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
+    user = User(username="uninitialized-user", password_hash="x", role="sales")
+    db_session.add(user)
+    db_session.commit()
+
+    with pytest.raises(ReceiptError, match="Initialize inventory"):
+        create_receipt(
+            db_session,
+            user=user,
+            receipt_date=date(2026, 8, 17),
+            proof_image=b"\x89PNG\r\n\x1a\nproof",
+            proof_content_type="image/png",
+        )
+    db_session.commit()
+    assert db_session.scalar(select(Receipt)) is None
+    assert db_session.scalar(select(MasterOutboxEvent)) is None

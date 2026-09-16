@@ -51,7 +51,7 @@ def franchise_serial_prefix(prefix: str) -> str:
         return serial_prefix
 
     raw_code = str(getattr(settings, "franchise_code", "") or "").strip().upper()
-    franchise_code = re.sub(r"[^A-Z0-9]+", "-", raw_code).strip("-")
+    franchise_code = re.sub(r"[^A-Z0-9_-]+", "-", raw_code).strip("-")
     placeholder_codes = {
         "CHANGE-ME",
         "CHANGEME",
@@ -69,8 +69,8 @@ def franchise_serial_prefix(prefix: str) -> str:
             "Configure a permanent unique FRANCHISE_CODE before generating "
             "QR labels in Setuora Lite."
         )
-    if len(franchise_code) > 40:
-        raise InventoryError("FRANCHISE_CODE must be 40 characters or fewer.")
+    if len(franchise_code) > 20:
+        raise InventoryError("FRANCHISE_CODE must be 20 characters or fewer.")
     if serial_prefix == franchise_code or serial_prefix.startswith(f"{franchise_code}-"):
         return serial_prefix
     return f"{franchise_code}-{serial_prefix}"
@@ -383,6 +383,8 @@ def apply_batch_statuses(db: Session, batch: Batch, user: User) -> None:
         if batch_type != BatchType.AUDIT and item.rate is None:
             # Preserve the valuation used when the stock moved; product rates can change later.
             item.rate = float(item.serial.product.default_rate or 0)
+        if item.sales_discount_rate is None:
+            item.sales_discount_rate = float(item.serial.product.sales_discount_rate or 0)
         if batch_type in {BatchType.RECEIVE, BatchType.PURCHASE}:
             target_status = SerialStatus.IN_STOCK.value
             scan_status = SerialStatus.PURCHASED.value
@@ -450,17 +452,23 @@ def update_batch_transaction_references(db: Session, batch: Batch) -> None:
 
 
 def group_batch_items(batch: Batch) -> list[dict[str, object]]:
-    grouped: dict[tuple[int, float], dict[str, object]] = {}
+    grouped: dict[tuple[int, float, float], dict[str, object]] = {}
     for item in batch.items:
         product = item.serial.product
         rate = item.rate if item.rate is not None else product.default_rate
+        discount_rate = (
+            item.sales_discount_rate
+            if item.sales_discount_rate is not None
+            else product.sales_discount_rate
+        )
         row = grouped.setdefault(
-            (product.id, float(rate or 0)),
+            (product.id, float(rate or 0), float(discount_rate or 0)),
             {
                 "product": product,
                 "quantity": 0,
                 "serials": [],
                 "rate": rate,
+                "sales_discount_rate": discount_rate,
             },
         )
         row["quantity"] = int(row["quantity"]) + item.quantity

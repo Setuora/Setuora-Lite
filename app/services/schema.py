@@ -87,6 +87,8 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
 
         if "batch_items" in inspector.get_table_names():
             item_columns = {column["name"] for column in inspector.get_columns("batch_items")}
+            if "sales_discount_rate" not in item_columns:
+                connection.execute(text("ALTER TABLE batch_items ADD COLUMN sales_discount_rate FLOAT"))
             if "fefo_picked" not in item_columns:
                 connection.execute(text("ALTER TABLE batch_items ADD COLUMN fefo_picked BOOLEAN DEFAULT 0"))
             if "shelf_location_id" not in item_columns:
@@ -314,6 +316,7 @@ def _rebuild_sqlite_inventory_tables(target: Engine) -> None:
                 serial_id INTEGER NOT NULL REFERENCES serials__setuora_new(id),
                 quantity INTEGER NOT NULL,
                 rate FLOAT,
+                sales_discount_rate FLOAT,
                 remarks TEXT,
                 fefo_picked BOOLEAN NOT NULL DEFAULT 0,
                 shelf_location_id INTEGER REFERENCES storage_locations(id),
@@ -335,11 +338,11 @@ def _rebuild_sqlite_inventory_tables(target: Engine) -> None:
             FROM serials;
 
             INSERT INTO batch_items__setuora_new (
-                id, batch_id, serial_id, quantity, rate, remarks, fefo_picked,
+                id, batch_id, serial_id, quantity, rate, sales_discount_rate, remarks, fefo_picked,
                 shelf_location_id, shelf_verified_by_id, shelf_verified_at, created_at
             )
             SELECT
-                id, batch_id, serial_id, quantity, rate, remarks, COALESCE(fefo_picked, 0),
+                id, batch_id, serial_id, quantity, rate, sales_discount_rate, remarks, COALESCE(fefo_picked, 0),
                 shelf_location_id, shelf_verified_by_id, shelf_verified_at, created_at
             FROM batch_items;
 

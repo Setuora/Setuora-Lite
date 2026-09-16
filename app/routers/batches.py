@@ -15,7 +15,6 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import ADMIN_ROLES, require_permission, require_user
-from app.config import get_settings
 from app.database import get_db
 from app.models import (
     AuditAssignment,
@@ -1165,14 +1164,15 @@ def submit_batch(request: Request, batch_id: int, db: Session = Depends(get_db))
     if batch.status != BatchStatus.DRAFT.value:
         return RedirectResponse(f"/batches/{batch.id}", status_code=303)
     lite_mode = request_app_mode(request) == "lite"
-    node_sync_enabled = lite_mode and get_settings().master_sync_enabled
     try:
         validate_sale_returns_complete(db, batch)
         validate_priced_batch(batch)
         apply_batch_statuses(db, batch, user)
         if batch.batch_type == BatchType.AUDIT.value:
             reconcile_audit_batch(db, batch)
-        if node_sync_enabled:
+        if lite_mode:
+            # Pausing transport must never discard stock/accounting events or
+            # route them to a local Tally worker that Lite does not run.
             batch.status = BatchStatus.PENDING_SYNC.value
             enqueue_batch_submitted_event(db, batch, user=user)
     except (InventoryError, ValueError) as exc:
@@ -1196,7 +1196,7 @@ def submit_batch(request: Request, batch_id: int, db: Session = Depends(get_db))
             status_code=400,
         )
     db.commit()
-    if not node_sync_enabled:
+    if not lite_mode:
         queue_batch_for_sync(db, batch)
     return RedirectResponse(f"/batches/{batch.id}", status_code=303)
 

@@ -72,9 +72,10 @@ def calculate_voucher_summary(batch: Batch) -> VoucherSummary:
     for group in group_batch_items(batch):
         product = group["product"]
         quantity = int(group["quantity"])
-        rate = money(group.get("rate") or product.default_rate)
+        group_rate = group.get("rate")
+        rate = money(product.default_rate if group_rate is None else group_rate)
         gross_value = money(rate * quantity)
-        discount_rate = money(product.sales_discount_rate if is_sales_side else 0)
+        discount_rate = money(group["sales_discount_rate"] if is_sales_side else 0)
         discount_amount = money(gross_value * discount_rate / Decimal("100"))
         line_amount = money(gross_value - discount_amount)
         product_gst_rate = money(product.gst_rate)

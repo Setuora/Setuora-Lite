@@ -39,6 +39,7 @@ def test_lite_composition_uses_master_connection_without_local_tally_check():
     assert "/tally-check" not in paths
     assert "/master-connection/settings" in paths
     assert "/master-connection/initialize" in paths
+    assert "/master-connection/events/{event_id}/retry" in paths
     assert "/master-connection/sftp-settings" not in paths
     assert "/api/v1/events" not in paths
     assert "/docs" not in paths
