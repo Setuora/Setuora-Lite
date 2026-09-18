@@ -78,6 +78,114 @@ function Install-SetuoraPython {
     if ($code -ne 0) { throw "Python installation failed (exit $code). Install Python 3.11 from python.org, then retry Setup / repair." }
 }
 
+function Get-SetuoraTailscale {
+    $installed = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
+    if (Test-Path -LiteralPath $installed) { return $installed }
+    if (${env:ProgramFiles(x86)}) {
+        $installed = Join-Path ${env:ProgramFiles(x86)} "Tailscale\tailscale.exe"
+        if (Test-Path -LiteralPath $installed) { return $installed }
+    }
+    $command = Get-Command "tailscale.exe" -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    return $null
+}
+
+function Install-SetuoraTailscale {
+    $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host "Installing Tailscale with Windows Package Manager..." -ForegroundColor Cyan
+        $code = Invoke-SetuoraNative $winget.Source @(
+            "install", "--id", "Tailscale.Tailscale", "--exact", "--source", "winget",
+            "--scope", "machine", "--accept-package-agreements", "--accept-source-agreements",
+            "--disable-interactivity"
+        )
+        if ($code -eq 0 -and (Get-SetuoraTailscale)) { return }
+        Write-Host "Windows Package Manager did not install Tailscale. Trying the official signed installer..." -ForegroundColor Yellow
+    }
+    $architecture = if ([Environment]::Is64BitOperatingSystem -and
+        $env:PROCESSOR_ARCHITECTURE -ne "ARM64" -and
+        $env:PROCESSOR_ARCHITEW6432 -ne "ARM64") { "amd64" } else { "x86" }
+    $installer = Join-Path ([IO.Path]::GetTempPath()) ("setuora-tailscale-" + [guid]::NewGuid().ToString("N") + ".msi")
+    try {
+        $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-$architecture.msi"
+        Write-Host "Downloading Tailscale from pkgs.tailscale.com..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+        $signature = Get-AuthenticodeSignature -LiteralPath $installer
+        if ($signature.Status -ne "Valid" -or -not $signature.SignerCertificate -or
+            $signature.SignerCertificate.Subject -notmatch "(^|,)\s*CN=Tailscale Inc\.?($|,)") {
+            throw "The downloaded Tailscale installer does not have a valid Tailscale signature. Installation stopped."
+        }
+        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList @(
+            "/i", ('"' + $installer + '"'), "/qn", "/norestart"
+        ) -Wait -PassThru
+        if ($process.ExitCode -eq 3010) {
+            throw "Tailscale installed but Windows requires a restart. Restart this computer, then run Setup / repair again."
+        }
+        if ($process.ExitCode -ne 0) { throw "Tailscale installation failed (exit $($process.ExitCode))." }
+    } finally {
+        Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SetuoraTailscale)) { throw "Tailscale installation finished, but tailscale.exe was not found. Restart Windows and retry Setup / repair." }
+}
+
+function Get-SetuoraTailnetState([string]$Tailscale) {
+    $savedPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $Tailscale status --json 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedPreference
+    }
+    if ($code -ne 0) { throw "Tailscale status failed (exit $code): $($output -join ' ')" }
+    try { return (($output -join [Environment]::NewLine) | ConvertFrom-Json) }
+    catch { throw "Tailscale returned an unreadable status. Restart its Windows service and retry Setup / repair." }
+}
+
+function Initialize-SetuoraTailnet {
+    $tailscale = Get-SetuoraTailscale
+    if (-not $tailscale) {
+        Install-SetuoraTailscale
+        $tailscale = Get-SetuoraTailscale
+    }
+    $service = Get-Service -Name "Tailscale" -ErrorAction SilentlyContinue
+    if (-not $service) { throw "The Tailscale Windows service is missing. Repair Tailscale, then retry Setup / repair." }
+    Set-Service -Name "Tailscale" -StartupType Automatic
+    if ($service.Status -ne "Running") { Start-Service -Name "Tailscale" }
+    # A just-installed service may not answer status yet; `up` can initialize it.
+    try { $state = Get-SetuoraTailnetState $tailscale } catch { $state = $null }
+    if ($state.BackendState -eq "Running") {
+        # `set` preserves any existing Tailscale options on an already joined PC.
+        $code = Invoke-SetuoraNative $tailscale @("set", "--unattended=true")
+    } else {
+        Write-Host "Connecting this Lite computer to Tailscale. If shown a sign-in link, open it and sign in to the same tailnet as Master." -ForegroundColor Cyan
+        $code = Invoke-SetuoraNative $tailscale @("up", "--unattended=true", "--timeout=10m")
+    }
+    if ($code -ne 0) { throw "Tailscale sign-in or unattended mode failed (exit $code). Complete the sign-in and retry Setup / repair." }
+    $code = Invoke-SetuoraNative $tailscale @("set", "--accept-dns=true")
+    if ($code -ne 0) { throw "Tailscale could not enable tailnet DNS (exit $code). Retry Setup / repair." }
+    $state = Get-SetuoraTailnetState $tailscale
+    if ($state.BackendState -ne "Running" -or -not $state.Self -or -not $state.Self.Online) {
+        throw "Tailscale is not online. Check the sign-in or device approval, then retry Setup / repair."
+    }
+    Write-Host "Tailscale is online and will stay connected after logout."
+    if ($state.Self.DNSName) { Write-Host "Lite tailnet name: $($state.Self.DNSName.TrimEnd('.'))" }
+}
+
+function Test-SetuoraTailnetReady {
+    $tailscale = Get-SetuoraTailscale
+    if (-not $tailscale) {
+        throw "Setuora Lite is running locally, but Tailscale is missing. Run Setup / repair to enable Master sync."
+    }
+    $state = Get-SetuoraTailnetState $tailscale
+    if ($state.BackendState -ne "Running" -or -not $state.Self -or -not $state.Self.Online) {
+        throw "Setuora Lite is running locally, but Tailscale is offline. Master sync will wait. Check the network or run Setup / repair."
+    }
+    Write-Host "Tailscale is online for Master sync."
+    $code = Invoke-SetuoraDeployment "master-check"
+    if ($code -ne 0) { throw "Lite is running locally, but its Master HTTPS route check failed. Review the message above and retry after fixing the connection." }
+}
+
 function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @()) {
     $python = Get-SetuoraPython
     if (-not $python -and $Action -eq "setup") {
@@ -143,7 +251,20 @@ function Update-SetuoraSource {
         $null = Invoke-SetuoraDeployment "start"
         throw
     }
-    return Invoke-SetuoraDeployment "update"
+    try {
+        $code = Invoke-SetuoraDeployment "update"
+    } catch {
+        Write-Host "The updated installation failed. Attempting a restart..." -ForegroundColor Yellow
+        $null = Invoke-SetuoraDeployment "start"
+        throw
+    }
+    if ($code -ne 0) {
+        Write-Host "The updated installation did not start cleanly (exit $code). Attempting a restart..." -ForegroundColor Yellow
+        $null = Invoke-SetuoraDeployment "start"
+        return $code
+    }
+    Test-SetuoraTailnetReady
+    return 0
 }
 
 function Install-SetuoraUpdate {
@@ -183,6 +304,25 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
     }
     switch ($Action) {
         "help" { Show-SetuoraHelp; return 0 }
+        "setup" {
+            $code = Invoke-SetuoraDeployment "setup" $ExtraArguments
+            if ($code -ne 0) { return $code }
+            Initialize-SetuoraTailnet
+            Test-SetuoraTailnetReady
+            return 0
+        }
+        "start" {
+            $code = Invoke-SetuoraDeployment "start" $ExtraArguments
+            if ($code -ne 0) { return $code }
+            Test-SetuoraTailnetReady
+            return 0
+        }
+        "status" {
+            $code = Invoke-SetuoraDeployment "status" $ExtraArguments
+            if ($code -ne 0) { return $code }
+            Test-SetuoraTailnetReady
+            return 0
+        }
         "open" {
             $code = Invoke-SetuoraDeployment "status"
             if ($code -ne 0) { return $code }
@@ -193,7 +333,12 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
             if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) { return Update-SetuoraSource }
             return Install-SetuoraUpdate
         }
-        "update-runtime" { return Invoke-SetuoraDeployment "update" }
+        "update-runtime" {
+            $code = Invoke-SetuoraDeployment "update"
+            if ($code -ne 0) { return $code }
+            Test-SetuoraTailnetReady
+            return 0
+        }
 
         default { return Invoke-SetuoraDeployment $Action $ExtraArguments }
     }

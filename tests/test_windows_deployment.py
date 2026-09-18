@@ -5,14 +5,17 @@ import deploy
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_active_deployment_is_windows_native_and_tailscale_free():
+def test_active_deployment_is_windows_native_with_tailscale_setup():
     assert not (PROJECT_ROOT / "compose.yaml").exists()
     assert not (PROJECT_ROOT / "Dockerfile").exists()
     deployment = (PROJECT_ROOT / "deploy.py").read_text(encoding="utf-8").lower()
     assert "schtasks.exe" in deployment
     assert "new-netfirewallrule" in deployment
     assert "docker" not in deployment
-    assert "tailscale" not in deployment
+    controller = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
+    assert "Initialize-SetuoraTailnet" in controller
+    assert "--unattended=true" in controller
+    assert "--accept-dns=true" in controller
 
 
 def test_linux_and_old_private_network_assets_are_archived():
@@ -250,6 +253,11 @@ def test_stop_waits_until_web_process_releases_port(monkeypatch):
         raise ConnectionRefusedError()
 
     monkeypatch.setattr(deploy.socket, "create_connection", connect)
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda *args, **kwargs: __import__("subprocess").CompletedProcess(args, 0),
+    )
     monkeypatch.setattr(deploy.time, "sleep", lambda _: None)
     deploy.stop(argparse.Namespace())
     assert events == ["task-end", "check-port", "check-port"]
@@ -262,10 +270,107 @@ def test_stop_does_not_report_success_when_process_keeps_running(monkeypatch):
 
     monkeypatch.setattr(deploy, "_check_windows", lambda: None)
     monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda *args, **kwargs: __import__("subprocess").CompletedProcess(args, 0),
+    )
     times = iter([0, 31])
     monkeypatch.setattr(deploy.time, "monotonic", lambda: next(times))
     with pytest.raises(deploy.DeploymentError, match="still in use"):
         deploy.stop(argparse.Namespace())
+
+
+def test_foreign_port_owner_blocks_stop_and_update(monkeypatch):
+    import argparse
+    import subprocess
+
+    import pytest
+
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: None)
+    class OpenConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(
+        deploy.socket, "create_connection", lambda *args, **kwargs: OpenConnection()
+    )
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 1, "", "Port 8000 is held by process 42, which is not this Setuora Lite service."
+        ),
+    )
+    with pytest.raises(deploy.DeploymentError, match="not this Setuora Lite service"):
+        deploy.stop(argparse.Namespace())
+
+
+def test_port_clearer_requires_exact_server_executable_and_command():
+    script = (PROJECT_ROOT / "scripts/windows/clear-owned-port.ps1").read_text(encoding="utf-8")
+    assert '.venv\\Scripts\\python.exe' in script
+    assert '.venv\\Scripts\\uvicorn.exe' in script
+    assert "[StringComparison]::OrdinalIgnoreCase" in script
+    assert "app\\.main:app" in script
+    assert "--port" in script
+    assert script.index("Test-SetuoraProcess $process") < script.index("Stop-Process -Id $processId")
+
+
+def test_master_route_check_requires_setuora_api_without_sending_credentials(tmp_path, monkeypatch):
+    import argparse
+    import io
+    import json
+    import urllib.error
+
+    import pytest
+
+    env_path = tmp_path / ".env"
+    env_path.write_text("MASTER_URL=\n", encoding="utf-8")
+    runtime = tmp_path / "data" / "master-connection.env"
+    runtime.parent.mkdir()
+    runtime.write_text(
+        "MASTER_URL=https://master.tailnet.ts.net\nMASTER_API_KEY=never-send-this\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(deploy, "ENV_PATH", env_path)
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    seen = []
+
+    def reachable(request, timeout):
+        seen.append((request.full_url, request.get_header("Authorization"), timeout))
+        body = io.BytesIO(json.dumps({"error": {"code": "AUTH_REQUIRED"}}).encode())
+        raise urllib.error.HTTPError(
+            request.full_url, 401, "Unauthorized", {"WWW-Authenticate": "Bearer"}, body
+        )
+
+    monkeypatch.setattr(deploy.urllib.request, "urlopen", reachable)
+    deploy.master_check(argparse.Namespace())
+    assert seen == [("https://master.tailnet.ts.net/api/v1/node", None, 10)]
+
+    def wrong_route(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO())
+
+    monkeypatch.setattr(deploy.urllib.request, "urlopen", wrong_route)
+    with pytest.raises(deploy.DeploymentError, match="HTTP 404"):
+        deploy.master_check(argparse.Namespace())
+
+    def wrong_unauthorized(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            401,
+            "Unauthorized",
+            {"WWW-Authenticate": "Bearer"},
+            io.BytesIO(b'{"error":null}'),
+        )
+
+    monkeypatch.setattr(deploy.urllib.request, "urlopen", wrong_unauthorized)
+    with pytest.raises(deploy.DeploymentError, match="HTTP 401"):
+        deploy.master_check(argparse.Namespace())
 
 
 def test_setup_repair_stops_existing_task_before_replacing_runtime(monkeypatch):

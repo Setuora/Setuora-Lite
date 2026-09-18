@@ -24,6 +24,7 @@ ENV_PATH = PROJECT_ROOT / ".env"
 ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.example"
 VENV_PATH = PROJECT_ROOT / ".venv"
 RUNNER_PATH = PROJECT_ROOT / "scripts" / "windows" / "run-server.cmd"
+PORT_CLEARER_PATH = PROJECT_ROOT / "scripts" / "windows" / "clear-owned-port.ps1"
 TASK_NAME = "Setuora-Lite"
 FIREWALL_RULE_NAME = "Setuora-Lite-LAN"
 UNSAFE_PASSWORDS = {
@@ -60,10 +61,11 @@ def _run(
     )
 
 
-def _read_env() -> tuple[list[str], dict[str, str]]:
-    if not ENV_PATH.exists():
+def _read_env(path: Path | None = None) -> tuple[list[str], dict[str, str]]:
+    path = path or ENV_PATH
+    if not path.exists():
         return [], {}
-    lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     values: dict[str, str] = {}
     for raw_line in lines:
         line = raw_line.strip()
@@ -321,6 +323,29 @@ def _wait_for_health(timeout_seconds: int = 120) -> None:
 
 def _wait_for_stop(timeout_seconds: int = 30) -> None:
     # Do not replace runtime files while the scheduled process still owns the port.
+    # Inspect every interface, including a listener that does not bind loopback.
+    # The helper refuses to stop any process it cannot identify as this server.
+    result = _run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(PORT_CLEARER_PATH),
+            "-ProjectRoot",
+            str(PROJECT_ROOT),
+            "-Port",
+            "8000",
+        ],
+        check=False,
+        capture=True,
+    )
+    if result.returncode != 0:
+        raise DeploymentError(
+            (result.stderr or result.stdout or "Could not inspect the owner of port 8000.").strip()
+        )
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         try:
@@ -357,7 +382,7 @@ def preflight(_args: argparse.Namespace) -> None:
         values,
         has_application_data=_has_application_data(),
     )
-    for required in (RUNNER_PATH, PROJECT_ROOT / "requirements-runtime.lock"):
+    for required in (RUNNER_PATH, PORT_CLEARER_PATH, PROJECT_ROOT / "requirements-runtime.lock"):
         if not required.is_file():
             issues.append(f"Required deployment file is missing: {required.name}")
     if issues:
@@ -371,6 +396,8 @@ def setup(_args: argparse.Namespace) -> None:
     preflight(_args)
     if _task("/Query", "/TN", TASK_NAME, check=False, capture=True).returncode == 0:
         stop(_args)
+    else:
+        _wait_for_stop()
     _install_runtime()
     _configure_private_firewall()
     _ensure_task()
@@ -391,6 +418,9 @@ def start(_args: argparse.Namespace) -> None:
         raise DeploymentError(
             "The Setuora background task is missing. Choose Setup / repair first."
         )
+    # Restarting an existing task also verifies that port 8000 is available or
+    # clears an orphan from this exact installation before Task Scheduler runs it.
+    stop(_args)
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     print("Setuora Lite is running.")
@@ -423,6 +453,60 @@ def status(_args: argparse.Namespace) -> None:
     print("Open http://127.0.0.1:8000 in your browser.")
 
 
+def master_check(_args: argparse.Namespace) -> None:
+    """Verify the configured private HTTPS route without sending a node credential."""
+    _check_windows()
+    _, values = _read_env()
+    runtime_path = Path(
+        os.getenv("MASTER_CONNECTION_SETTINGS_FILE")
+        or values.get("MASTER_CONNECTION_SETTINGS_FILE")
+        or "data/master-connection.env"
+    )
+    if not runtime_path.is_absolute():
+        runtime_path = PROJECT_ROOT / runtime_path
+    _, runtime = _read_env(runtime_path)
+    configured_origin = os.getenv("MASTER_URL", values.get("MASTER_URL", ""))
+    origin = runtime.get("MASTER_URL", configured_origin).strip().rstrip("/")
+    if not origin:
+        print("Master connection is not configured yet. Paste the connection details in Admin -> Master connection.")
+        return
+    from app.config import master_url_configuration_error
+
+    issue = master_url_configuration_error(origin)
+    if issue:
+        raise DeploymentError(issue)
+    request = urllib.request.Request(
+        f"{origin}/api/v1/node", headers={"Accept": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310
+            status_code = response.status
+    except urllib.error.HTTPError as exc:
+        status_code = exc.code
+        try:
+            payload = json.load(exc)
+        except (ValueError, OSError):
+            payload = {}
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if (
+            status_code == 401
+            and exc.headers.get("WWW-Authenticate") == "Bearer"
+            and isinstance(error, dict)
+            and error.get("code") == "AUTH_REQUIRED"
+        ):
+            print("Master private HTTPS API is reachable. Credential validation remains in the application.")
+            return
+    except (OSError, urllib.error.URLError) as exc:
+        raise DeploymentError(
+            "The saved Master HTTPS address is unreachable from this Lite computer. "
+            "Check Tailscale, MagicDNS, HTTPS certificates, and Master Serve; Lite remains running locally."
+        ) from exc
+    raise DeploymentError(
+        f"The saved Master address returned HTTP {status_code} instead of the Setuora node API. "
+        "Check the address and Master Serve route; Lite remains running locally."
+    )
+
+
 def logs(args: argparse.Namespace) -> None:
     _check_windows()
     log_path = PROJECT_ROOT / "logs" / "setuora.log"
@@ -441,9 +525,18 @@ def update(_args: argparse.Namespace) -> None:
         raise DeploymentError("Run `setuora.ps1 setup` first.")
     preflight(_args)
     stop(_args)
-    _install_runtime()
-    _configure_private_firewall()
-    _ensure_task()
+    try:
+        _install_runtime()
+        _configure_private_firewall()
+        _ensure_task()
+    except (DeploymentError, subprocess.CalledProcessError, OSError):
+        # A failed dependency or task refresh should not leave the previous app
+        # offline if its existing runtime is still usable.
+        try:
+            start(_args)
+        except (DeploymentError, subprocess.CalledProcessError, OSError) as restart_error:
+            print(f"Restart after failed update also failed: {restart_error}", file=sys.stderr)
+        raise
     start(_args)
     print("Setuora Lite was updated and is healthy.")
 
@@ -457,6 +550,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("start", start, "start the Windows scheduled task"),
         ("stop", stop, "stop Setuora Lite while preserving data"),
         ("status", status, "show the Windows scheduled task state"),
+        ("master-check", master_check, "verify the configured private Master HTTPS route"),
         ("update", update, "update dependencies and restart"),
     ):
         command = subparsers.add_parser(name, help=help_text)

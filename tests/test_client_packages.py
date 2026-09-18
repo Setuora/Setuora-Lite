@@ -37,6 +37,7 @@ def test_package_builder_creates_windows_only_installer(tmp_path):
     assert f"{root}/setuora.bat" in members
     assert f"{root}/app/services/sftp_tally_sync.py" in members
     assert f"{root}/scripts/windows/run-server.cmd" in members
+    assert f"{root}/scripts/windows/clear-owned-port.ps1" in members
     assert f"{root}/compose.yaml" not in members
     assert f"{root}/Dockerfile" not in members
     for member in members:

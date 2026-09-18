@@ -12,6 +12,8 @@ foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Tex
 $originalElevate = (Get-Command Invoke-SetuoraElevated).ScriptBlock
 $originalUpdate = (Get-Command Update-SetuoraSource).ScriptBlock
 $originalCommand = (Get-Command Invoke-SetuoraCommand).ScriptBlock
+$originalTailnet = (Get-Command Initialize-SetuoraTailnet).ScriptBlock
+$originalTailnetCheck = (Get-Command Test-SetuoraTailnetReady).ScriptBlock
 $ApplicationRoot = [IO.Path]::GetTempPath()
 $ControllerPath = "C:\Warehouse & Team\O'Neil\setuora.ps1"
 $ProductName = 'Setuora test'
@@ -26,6 +28,7 @@ $script:FailStartProcess = $false
 $script:DirtySource = $false
 $script:FailStop = $false
 $script:FailMerge = $false
+$script:FailUpdate = $false
 
 function Assert-Equal($Actual, $Expected, [string]$Message) {
     if (($Actual -join '|') -ne ($Expected -join '|')) { throw "$Message. Expected [$($Expected -join '|')], got [$($Actual -join '|')]" }
@@ -36,8 +39,11 @@ function Test-Path([string]$LiteralPath) { return $script:IsSource }
 function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @()) {
     $script:Calls.Add("deploy:$Action")
     if ($Action -eq 'stop' -and $script:FailStop) { return 5 }
+    if ($Action -eq 'update' -and $script:FailUpdate) { return 8 }
     return $script:DeployExit
 }
+function Initialize-SetuoraTailnet { $script:Calls.Add('tailnet:setup') }
+function Test-SetuoraTailnetReady { $script:Calls.Add('tailnet:check') }
 function Invoke-SetuoraElevated([string]$Action, [string[]]$ExtraArguments = @()) {
     $script:Calls.Add("elevate:$Action")
     return 17
@@ -68,7 +74,8 @@ switch ($Case) {
         foreach ($action in @('status', 'logs')) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 0 "$action succeeds without elevation"
-            Assert-Equal $script:Calls @("deploy:$action") "$action remains read-only"
+            $expected = if ($action -eq 'status') { @('deploy:status', 'tailnet:check') } else { @("deploy:$action") }
+            Assert-Equal $script:Calls $expected "$action remains read-only"
         }
         Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'help') 0 'Help succeeds without Python/admin'
@@ -100,7 +107,12 @@ switch ($Case) {
         foreach ($action in @('setup', 'start', 'stop', 'preflight')) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 0 'An administrator deploys directly'
-            Assert-Equal $script:Calls @("deploy:$action") 'No nested elevation'
+            $expected = switch ($action) {
+                'setup' { @('deploy:setup', 'tailnet:setup', 'tailnet:check') }
+                'start' { @('deploy:start', 'tailnet:check') }
+                default { @("deploy:$action") }
+            }
+            Assert-Equal $script:Calls $expected 'No nested elevation'
         }
         Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'update') 22 'Installed update opens picker'
@@ -111,7 +123,7 @@ switch ($Case) {
         Assert-Equal $script:Calls @('source-update') 'Source update does not use package picker'
         Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'update-runtime') 0 'Installer internal update succeeds'
-        Assert-Equal $script:Calls @('deploy:update') 'Internal update cannot open a second installer'
+        Assert-Equal $script:Calls @('deploy:update', 'tailnet:check') 'Internal update cannot open a second installer'
     }
     'source-update' {
         Set-Item Function:Update-SetuoraSource -Value $originalUpdate
@@ -124,7 +136,7 @@ switch ($Case) {
             return ''
         }
         Assert-Equal (Update-SetuoraSource) 0 'Clean source update succeeds'
-        Assert-Equal $script:Calls @('deploy:preflight', 'git:rev-parse', 'git:status', 'git:branch', 'git:fetch', 'git:rev-parse', 'git:merge-base', 'deploy:stop', 'git:merge', 'deploy:update') 'Source update order'
+        Assert-Equal $script:Calls @('deploy:preflight', 'git:rev-parse', 'git:status', 'git:branch', 'git:fetch', 'git:rev-parse', 'git:merge-base', 'deploy:stop', 'git:merge', 'deploy:update', 'tailnet:check') 'Source update order'
         $script:DirtySource = $true
         Reset-Calls
         $caught = $false
@@ -143,6 +155,62 @@ switch ($Case) {
         try { $null = Update-SetuoraSource } catch { $caught = $true }
         Assert-Equal $caught $true 'Failed merge reports failure'
         Assert-Equal $script:Calls[$script:Calls.Count - 1] 'deploy:start' 'Failed merge attempts to restart previous app'
+        $script:FailMerge = $false
+        $script:FailUpdate = $true
+        Reset-Calls
+        Assert-Equal (Update-SetuoraSource) 8 'Failed runtime refresh reports failure'
+        Assert-Equal $script:Calls[$script:Calls.Count - 1] 'deploy:start' 'Failed runtime refresh attempts a restart'
+    }
+    'tailnet' {
+        Set-Item Function:Initialize-SetuoraTailnet -Value $originalTailnet
+        Set-Item Function:Test-SetuoraTailnetReady -Value $originalTailnetCheck
+        function Get-SetuoraTailscale { return 'C:\Program Files\Tailscale\tailscale.exe' }
+        function Get-Service([string]$Name, $ErrorAction) {
+            $script:Calls.Add("service:get:$Name")
+            return [pscustomobject]@{ Status = 'Stopped' }
+        }
+        function Set-Service([string]$Name, [string]$StartupType) {
+            $script:Calls.Add("service:auto:$Name")
+        }
+        function Start-Service([string]$Name) { $script:Calls.Add("service:start:$Name") }
+        function Invoke-SetuoraNative([string]$File, [string[]]$Arguments) {
+            $script:Calls.Add("tailscale:$($Arguments[0])")
+            if ($script:NativeFail -and $Arguments[0] -eq 'up') { return 1 }
+            return 0
+        }
+        function Get-SetuoraTailnetState([string]$Tailscale) {
+            $script:Calls.Add('tailscale:status')
+            return [pscustomobject]@{
+                BackendState = $script:TailnetState
+                Self = [pscustomobject]@{ Online = $true; DNSName = 'lite.tailnet.ts.net.' }
+            }
+        }
+        $script:NativeFail = $false
+        $script:TailnetState = 'Running'
+        Initialize-SetuoraTailnet
+        Assert-Equal $script:Calls @(
+            'service:get:Tailscale', 'service:auto:Tailscale', 'service:start:Tailscale',
+            'tailscale:status', 'tailscale:set', 'tailscale:set', 'tailscale:status'
+        ) 'Setup preserves existing Tailscale settings and checks that it is online'
+        Reset-Calls
+        $script:NativeFail = $true
+        $script:TailnetState = 'Stopped'
+        $caught = $false
+        try { Initialize-SetuoraTailnet } catch { $caught = $true }
+        Assert-Equal $caught $true 'Failed Tailscale login stops setup'
+        Assert-Equal $script:Calls @(
+            'service:get:Tailscale', 'service:auto:Tailscale', 'service:start:Tailscale',
+            'tailscale:status', 'tailscale:up'
+        ) 'Failed Tailscale login cannot report connected'
+        Reset-Calls
+        $caught = $false
+        try { Test-SetuoraTailnetReady } catch { $caught = $true }
+        Assert-Equal $caught $true 'Offline tailnet is reported after local app startup'
+        Assert-Equal $script:Calls @('tailscale:status') 'Readiness check does not mutate or disconnect Tailscale'
+        Reset-Calls
+        $script:TailnetState = 'Running'
+        Test-SetuoraTailnetReady
+        Assert-Equal $script:Calls @('tailscale:status', 'deploy:master-check') 'Online tailnet checks the saved Master HTTPS route'
     }
     'menu' {
         function Invoke-SetuoraCommand([string]$Action) {
