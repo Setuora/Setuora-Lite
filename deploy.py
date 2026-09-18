@@ -8,7 +8,6 @@ import json
 import os
 import re
 import secrets
-import socket
 import subprocess  # nosec B404
 import sys
 import tempfile
@@ -348,18 +347,34 @@ def _wait_for_stop(timeout_seconds: int = 30) -> None:
         )
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", 8000), timeout=1):
-                pass
-        except ConnectionRefusedError:
+        if not _port_listeners():
             return
-        except OSError:
-            pass
         time.sleep(0.5)
     raise DeploymentError(
         "Port 8000 is still in use after stopping the task. "
         "Check the running Setuora process before updating files."
     )
+
+
+def _port_listeners() -> list[int]:
+    script = (
+        "$items = @(Get-NetTCPConnection -LocalPort 8000 -State Listen "
+        "-ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); "
+        "ConvertTo-Json -InputObject $items -Compress"
+    )
+    result = _run(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-Command", script],
+        capture=True,
+    )
+    try:
+        listeners = json.loads(result.stdout or "[]")
+    except ValueError as exc:
+        raise DeploymentError("Windows could not inspect port 8000 listeners.") from exc
+    if not isinstance(listeners, list) or any(
+        not isinstance(pid, int) for pid in listeners
+    ):
+        raise DeploymentError("Windows returned invalid port 8000 listener details.")
+    return listeners
 
 
 def _has_application_data() -> bool:

@@ -236,23 +236,13 @@ def test_stop_waits_until_web_process_releases_port(monkeypatch):
     events = []
     monkeypatch.setattr(deploy, "_check_windows", lambda: None)
     monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: events.append("task-end"))
-    attempts = iter([True, False])
+    attempts = iter([[42], []])
 
-    class OpenConnection:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    def connect(address, timeout):
+    def listeners():
         events.append("check-port")
-        assert address == ("127.0.0.1", 8000)
-        if next(attempts):
-            return OpenConnection()
-        raise ConnectionRefusedError()
+        return next(attempts)
 
-    monkeypatch.setattr(deploy.socket, "create_connection", connect)
+    monkeypatch.setattr(deploy, "_port_listeners", listeners)
     monkeypatch.setattr(
         deploy,
         "_run",
@@ -261,6 +251,16 @@ def test_stop_waits_until_web_process_releases_port(monkeypatch):
     monkeypatch.setattr(deploy.time, "sleep", lambda _: None)
     deploy.stop(argparse.Namespace())
     assert events == ["task-end", "check-port", "check-port"]
+
+
+def test_no_listener_is_free_even_when_loopback_connections_time_out(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        deploy, "_run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
+    )
+    monkeypatch.setattr(deploy, "_port_listeners", lambda: [])
+    deploy._wait_for_stop(timeout_seconds=1)
 
 
 def test_stop_does_not_report_success_when_process_keeps_running(monkeypatch):
@@ -275,6 +275,7 @@ def test_stop_does_not_report_success_when_process_keeps_running(monkeypatch):
         "_run",
         lambda *args, **kwargs: __import__("subprocess").CompletedProcess(args, 0),
     )
+    monkeypatch.setattr(deploy, "_port_listeners", lambda: [42])
     times = iter([0, 31])
     monkeypatch.setattr(deploy.time, "monotonic", lambda: next(times))
     with pytest.raises(deploy.DeploymentError, match="still in use"):
@@ -289,16 +290,6 @@ def test_foreign_port_owner_blocks_stop_and_update(monkeypatch):
 
     monkeypatch.setattr(deploy, "_check_windows", lambda: None)
     monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: None)
-    class OpenConnection:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-    monkeypatch.setattr(
-        deploy.socket, "create_connection", lambda *args, **kwargs: OpenConnection()
-    )
     monkeypatch.setattr(
         deploy,
         "_run",
