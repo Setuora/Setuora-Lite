@@ -104,22 +104,22 @@
   </div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Product</th><th>Auditor</th><th>Status</th><th>Expected</th><th>Found</th><th>Remaining</th><th></th></tr></thead>
+      <thead><tr><th>Product</th><th>Auditor</th><th>Status</th><th class="numeric">Expected</th><th class="numeric">Found</th><th class="numeric">Remaining</th><th class="col-actions">Actions</th></tr></thead>
       <tbody>
         {% for row in audit_assignments %}
         {% set assignment = row.assignment %}
         {% set latest_batch = row.latest_batch %}
         <tr>
-          <td>
+          <td class="cell-wrap">
             <strong>{{ assignment.product.product_name }}</strong>
             <small>{{ assignment.product.product_code }}</small>
           </td>
           <td>{{ assignment.auditor.username }}</td>
           <td><span class="status {{ row.progress.state|lower }}">{{ row.progress.state }}</span></td>
-          <td>{{ row.progress.expected }}</td>
-          <td>{{ row.progress.verified }}</td>
-          <td>{{ row.progress.pending }}</td>
-          <td>
+          <td class="numeric">{{ row.progress.expected }}</td>
+          <td class="numeric">{{ row.progress.verified }}</td>
+          <td class="numeric">{{ row.progress.pending }}</td>
+          <td class="col-actions">
             {% if latest_batch and role_can_view_batch(user, latest_batch.batch_type) %}
             <a class="button small" href="/batches/{{ latest_batch.id }}">Open audit</a>
             {% else %}
@@ -139,20 +139,20 @@
   <div class="section-title"><h2>Transactions</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Time</th><th>User</th><th>Type</th><th>Serial</th><th>Product</th><th>Invoice created by</th><th>Barcode sold by</th><th>Product audited by</th><th>Status</th><th>Tally</th></tr></thead>
+      <thead><tr><th class="cell-date">Time</th><th>User</th><th>Type</th><th>Serial</th><th>Product</th><th>Invoice created by</th><th>Barcode sold by</th><th>Product audited by</th><th>Status</th><th>Tally</th></tr></thead>
       <tbody>
         {% for txn in transactions %}
         <tr>
-          <td>{{ report_date(txn.created_at) }}</td>
+          <td class="cell-date">{{ report_date(txn.created_at) }}</td>
           <td>{{ txn.user.username }}</td>
           <td>{{ txn.transaction_type }}</td>
-          <td>{% if txn.serial %}<a href="/serials/{{ txn.serial.id }}">{{ txn.serial_number }}</a>{% else %}{{ txn.serial_number or '-' }}{% endif %}</td>
-          <td>{{ txn.product.product_code if txn.product else '-' }}</td>
+          <td class="cell-code">{% if txn.serial %}<a href="/serials/{{ txn.serial.id }}">{{ txn.serial_number }}</a>{% else %}{{ txn.serial_number or '-' }}{% endif %}</td>
+          <td class="cell-wrap">{{ txn.product.product_code if txn.product else '-' }}</td>
           <td>{{ invoice_created_by(txn) or '-' }}</td>
           <td>{{ barcode_sold_by(txn) or '-' }}</td>
           <td>{{ product_audited_by(txn) or '-' }}</td>
           <td>{{ txn.status_from or '-' }} &rarr; {{ txn.status_to or '-' }}</td>
-          <td>{{ txn.tally_reference or '-' }}</td>
+          <td class="cell-code">{{ txn.tally_reference or '-' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="10" class="empty">No transactions found</td></tr>
@@ -170,18 +170,18 @@
   </div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Time</th><th>Audited by</th><th>Serial</th><th>Product</th><th>Audit batch</th><th>Expected status</th></tr></thead>
+      <thead><tr><th class="cell-date">Time</th><th>Audited by</th><th>Serial</th><th>Product</th><th>Audit batch</th><th>Expected status</th></tr></thead>
       <tbody>
         {% for finding in missing_stock %}
         <tr>
-          <td>{{ report_date(finding.created_at) }}</td>
+          <td class="cell-date">{{ report_date(finding.created_at) }}</td>
           <td>{{ finding.batch.user.username }}</td>
-          <td>{% if finding.serial %}<a href="/serials/{{ finding.serial.id }}">{{ finding.serial_number }}</a>{% else %}{{ finding.serial_number }}{% endif %}</td>
-          <td>
+          <td class="cell-code">{% if finding.serial %}<a href="/serials/{{ finding.serial.id }}">{{ finding.serial_number }}</a>{% else %}{{ finding.serial_number }}{% endif %}</td>
+          <td class="cell-wrap">
             <strong>{{ finding.product_code or '-' }}</strong>
             <small>{{ finding.product_name or '-' }}</small>
           </td>
-          <td>
+          <td class="cell-code">
             {% if role_can_view_batch(user, finding.batch.batch_type) %}
             <a href="/batches/{{ finding.batch.id }}">{{ finding.batch.batch_number }}</a>
             {% else %}
@@ -207,18 +207,18 @@
   </div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Loss due to</th><th>Quantity</th><th>Value</th></tr></thead>
+      <thead><tr><th>Loss due to</th><th class="numeric">Quantity</th><th class="numeric">Value</th></tr></thead>
       <tbody>
         {% for loss in losses.rows %}
         <tr>
           <td>{{ loss.label }}</td>
-          <td>{{ loss.quantity }}</td>
-          <td>Rs {{ '%.2f'|format(loss.value) }}</td>
+          <td class="numeric">{{ loss.quantity }}</td>
+          <td class="numeric">Rs {{ '%.2f'|format(loss.value) }}</td>
         </tr>
         {% endfor %}
       </tbody>
       <tfoot>
-        <tr><th>Total loss</th><th>{{ losses.total_quantity }}</th><th>Rs {{ '%.2f'|format(losses.total_value) }}</th></tr>
+        <tr><th>Total loss</th><th class="numeric">{{ losses.total_quantity }}</th><th class="numeric">Rs {{ '%.2f'|format(losses.total_value) }}</th></tr>
       </tfoot>
     </table>
   </div>
@@ -230,14 +230,14 @@
     <div class="section-title"><h2>Scans</h2></div>
     <div class="table-scroll reports-activity-scroll">
       <table class="reports-activity-table reports-scans-table">
-        <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Serial</th><th>Status</th></tr></thead>
+        <thead><tr><th class="cell-date">Time</th><th>User</th><th>Action</th><th>Serial</th><th>Status</th></tr></thead>
         <tbody>
           {% for scan in scans %}
           <tr>
-            <td>{{ report_date(scan.created_at) }}</td>
+            <td class="cell-date">{{ report_date(scan.created_at) }}</td>
             <td>{{ scan.user.username }}</td>
             <td>{{ scan.action }}</td>
-            <td>{{ scan.serial_number_raw }}</td>
+            <td class="cell-code">{{ scan.serial_number_raw }}</td>
             <td><span class="status {{ scan.status|lower }}">{{ scan.status }}</span></td>
           </tr>
           {% else %}
@@ -251,11 +251,11 @@
     <div class="section-title"><h2>{{ 'Pending Master delivery' if app_mode == 'lite' else 'Pending sync' }}</h2></div>
     <div class="table-scroll reports-activity-scroll">
       <table class="reports-activity-table reports-pending-table">
-        <thead><tr><th>Batch</th><th>Status</th>{% if app_mode != 'lite' %}<th>Retries</th><th>Last retry</th>{% endif %}<th>Error</th></tr></thead>
+        <thead><tr><th>Batch</th><th>Status</th>{% if app_mode != 'lite' %}<th class="numeric">Retries</th><th class="cell-date">Last retry</th>{% endif %}<th>Error</th></tr></thead>
         <tbody>
           {% for batch in pending %}
           <tr>
-            <td>
+            <td class="cell-code">
               {% if role_can_view_batch(user, batch.batch_type) %}
               <a href="/batches/{{ batch.id }}">{{ batch.batch_number }}</a>
               {% else %}
@@ -264,10 +264,10 @@
             </td>
             <td><span class="status {{ batch.status|lower }}">{{ batch.status }}</span></td>
             {% if app_mode != 'lite' %}
-            <td>{{ batch.retry_count or 0 }}</td>
-            <td>{{ report_date(batch.last_retry_at) or '-' }}</td>
+            <td class="numeric">{{ batch.retry_count or 0 }}</td>
+            <td class="cell-date">{{ report_date(batch.last_retry_at) or '-' }}</td>
             {% endif %}
-            <td>{{ batch.last_error or '-' }}</td>
+            <td class="cell-wrap">{{ batch.last_error or '-' }}</td>
           </tr>
           {% else %}
           <tr><td colspan="{{ 3 if app_mode == 'lite' else 5 }}" class="empty">No pending {{ 'Master delivery' if app_mode == 'lite' else 'sync' }}</td></tr>

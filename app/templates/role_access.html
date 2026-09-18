@@ -103,8 +103,12 @@
 
     function closePicker() {
       if (!openPicker) return;
+      if (openPicker.menu.contains(document.activeElement)) {
+        openPicker.button.focus({ preventScroll: true });
+      }
       openPicker.classList.remove("is-open", "opens-up");
       openPicker.button.setAttribute("aria-expanded", "false");
+      openPicker.menu.removeAttribute("style");
       openPicker = null;
     }
 
@@ -127,15 +131,29 @@
       picker.button.setAttribute("aria-expanded", "true");
       openPicker = picker;
 
-      const scrollContainer = picker.closest(".access-matrix-scroll--limited");
-      const boundary = scrollContainer
-        ? scrollContainer.getBoundingClientRect()
-        : { top: 0, bottom: window.innerHeight };
+      // Use the viewport as the containing block so a short or scrolling
+      // permission table cannot clip the available choices.
+      const menu = picker.menu;
       const buttonBounds = picker.button.getBoundingClientRect();
-      const menuHeight = picker.menu.offsetHeight;
-      const roomAbove = buttonBounds.top - Math.max(boundary.top, 0);
-      const roomBelow = Math.min(boundary.bottom, window.innerHeight) - buttonBounds.bottom;
-      picker.classList.toggle("opens-up", roomBelow < menuHeight + 7 && roomAbove > roomBelow);
+      const margin = 12;
+      const gap = 7;
+      menu.style.position = "fixed";
+      menu.style.transform = "none";
+      menu.style.bottom = "auto";
+      menu.style.zIndex = "60";
+      menu.style.maxHeight = `${Math.max(40, window.innerHeight - margin * 2)}px`;
+      menu.style.overflowY = "auto";
+      const menuBounds = menu.getBoundingClientRect();
+      const roomAbove = buttonBounds.top - margin - gap;
+      const roomBelow = window.innerHeight - buttonBounds.bottom - margin - gap;
+      const opensUp = roomBelow < menuBounds.height && roomAbove > roomBelow;
+      const availableHeight = Math.max(40, opensUp ? roomAbove : roomBelow);
+      menu.style.maxHeight = `${availableHeight}px`;
+      const height = Math.min(menuBounds.height, availableHeight);
+      const top = opensUp ? buttonBounds.top - height - gap : buttonBounds.bottom + gap;
+      menu.style.top = `${Math.max(margin, Math.min(top, window.innerHeight - height - margin))}px`;
+      const centeredLeft = buttonBounds.left + (buttonBounds.width - menuBounds.width) / 2;
+      menu.style.left = `${Math.max(margin, Math.min(centeredLeft, window.innerWidth - menuBounds.width - margin))}px`;
 
       const selectedItem = picker.items.find((item) => item.dataset.value === picker.select.value);
       if (selectedItem) selectedItem.focus({ preventScroll: true });
@@ -182,6 +200,8 @@
       picker.items = items;
       picker.append(button, menu);
       select.after(picker);
+      select.tabIndex = -1;
+      select.setAttribute("aria-hidden", "true");
       syncPicker(picker);
 
       button.addEventListener("click", (event) => {
@@ -202,7 +222,8 @@
 
       menu.addEventListener("keydown", (event) => {
         const currentIndex = items.indexOf(document.activeElement);
-        if (event.key === "Escape") {
+        if (event.key === "Escape" || event.key === "Tab") {
+          if (event.key === "Escape") event.preventDefault();
           closePicker();
           button.focus();
         }
@@ -221,9 +242,10 @@
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closePicker();
     });
-    document.querySelectorAll(".access-matrix-scroll, .access-table-scroll").forEach((container) => {
-      container.addEventListener("scroll", closePicker, { passive: true });
-    });
+    window.addEventListener("resize", closePicker);
+    window.addEventListener("scroll", (event) => {
+      if (openPicker && !openPicker.menu.contains(event.target)) closePicker();
+    }, { capture: true, passive: true });
   })();
 </script>
 {% endblock %}

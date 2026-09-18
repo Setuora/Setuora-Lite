@@ -19,18 +19,18 @@
 <section class="panel">
   <div class="table-scroll">
     <table class="movement-history-table">
-      <thead><tr><th>Date & time</th><th>Reference</th><th>Product / batch</th><th>Qty</th><th>Previous location</th><th>New location</th><th>User</th><th>Reason</th><th>Device</th></tr></thead>
+      <thead><tr><th class="cell-date">Date & time</th><th>Reference</th><th>Product / batch</th><th class="numeric">Qty</th><th>Previous location</th><th>New location</th><th>User</th><th>Reason</th><th>Device</th></tr></thead>
       <tbody>
         {% for row in relocations %}
         <tr>
-          <td>{{ row.created_at.strftime('%d %b %Y %H:%M') }}</td>
-          <td><strong>{{ row.reference_number }}</strong></td>
-          <td>{{ row.product.product_name }}<small>{{ row.product.product_code }} · {{ row.product_batch_number or 'No batch' }}</small></td>
-          <td>{{ row.quantity }}</td>
-          <td>{{ row.previous_location_snapshot }}</td>
-          <td>{{ row.new_location_snapshot }}</td>
+          <td class="cell-date">{{ row.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-code"><strong>{{ row.reference_number }}</strong></td>
+          <td class="cell-wrap">{{ row.product.product_name }}<small>{{ row.product.product_code }} · {{ row.product_batch_number or 'No batch' }}</small></td>
+          <td class="numeric">{{ row.quantity }}</td>
+          <td class="cell-wrap">{{ row.previous_location_snapshot }}</td>
+          <td class="cell-wrap">{{ row.new_location_snapshot }}</td>
           <td>{{ row.user.username }}</td>
-          <td>{{ row.reason or '-' }}</td>
+          <td class="cell-wrap">{{ row.reason or '-' }}</td>
           <td class="device-cell">{{ row.device_used }}</td>
         </tr>
         {% else %}

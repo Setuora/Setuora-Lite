@@ -35,16 +35,16 @@
   <div class="section-title"><h2>Location movement history</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Time</th><th>Reference</th><th>Previous location</th><th>New location</th><th>User</th><th>Reason</th></tr></thead>
+      <thead><tr><th class="cell-date">Time</th><th>Reference</th><th>Previous location</th><th>New location</th><th>User</th><th>Reason</th></tr></thead>
       <tbody>
         {% for move in relocations %}
         <tr>
-          <td>{{ move.created_at.strftime('%d %b %Y %H:%M') }}</td>
-          <td>{{ move.reference_number }}</td>
-          <td>{{ move.previous_location_snapshot }}</td>
-          <td>{{ move.new_location_snapshot }}</td>
+          <td class="cell-date">{{ move.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-code">{{ move.reference_number }}</td>
+          <td class="cell-wrap">{{ move.previous_location_snapshot }}</td>
+          <td class="cell-wrap">{{ move.new_location_snapshot }}</td>
           <td>{{ move.user.username }}</td>
-          <td>{{ move.reason or '-' }}</td>
+          <td class="cell-wrap">{{ move.reason or '-' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No location movements recorded</td></tr>
@@ -58,22 +58,22 @@
   <div class="section-title"><h2>Transaction history</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Time</th><th>Type</th><th>Status</th><th>User</th><th>Invoice created by</th><th>Barcode sold by</th><th>Product audited by</th><th>Reference</th><th>Tally</th></tr></thead>
+      <thead><tr><th class="cell-date">Time</th><th>Type</th><th>Status</th><th>User</th><th>Invoice created by</th><th>Barcode sold by</th><th>Product audited by</th><th>Reference</th><th>Tally</th></tr></thead>
       <tbody>
         {% for txn in transactions %}
         <tr>
-          <td>{{ txn.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ txn.created_at.strftime('%d %b %Y %H:%M') }}</td>
           <td>{{ txn.transaction_type }}</td>
           <td>{{ txn.status_from or '-' }} &rarr; {{ txn.status_to or '-' }}</td>
           <td>{{ txn.user.username }}</td>
           <td>{{ invoice_created_by(txn) or '-' }}</td>
           <td>{{ barcode_sold_by(txn) or '-' }}</td>
           <td>{{ product_audited_by(txn) or '-' }}</td>
-          <td>
+          <td class="cell-code">
             {% if txn.batch %}<a href="/batches/{{ txn.batch.id }}">{{ txn.reference_number or txn.batch.batch_number }}</a>
             {% else %}{{ txn.reference_number or '-' }}{% endif %}
           </td>
-          <td>{{ txn.tally_reference or '-' }}</td>
+          <td class="cell-code">{{ txn.tally_reference or '-' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="9" class="empty">No transaction history recorded</td></tr>
@@ -87,15 +87,15 @@
   <div class="section-title"><h2>Scan log</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Time</th><th>Action</th><th>Status</th><th>User</th><th>Message</th></tr></thead>
+      <thead><tr><th class="cell-date">Time</th><th>Action</th><th>Status</th><th>User</th><th>Message</th></tr></thead>
       <tbody>
         {% for log in logs %}
         <tr>
-          <td>{{ log.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ log.created_at.strftime('%d %b %Y %H:%M') }}</td>
           <td>{{ log.action }}</td>
           <td><span class="status {{ log.status|lower }}">{{ log.status }}</span></td>
           <td>{{ log.user.username }}</td>
-          <td>{{ log.message or '-' }}</td>
+          <td class="cell-wrap">{{ log.message or '-' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="5" class="empty">No scan log entries</td></tr>

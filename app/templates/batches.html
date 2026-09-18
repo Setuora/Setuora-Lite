@@ -35,11 +35,11 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Batch</th><th>Type</th><th>Party</th><th>Reason</th><th>Status</th><th>Items</th>{% if app_mode != 'lite' %}<th>Retries</th>{% endif %}<th>Created</th><th></th></tr></thead>
+      <thead><tr><th>Batch</th><th>Type</th><th>Party</th><th>Reason</th><th>Status</th><th class="numeric">Items</th>{% if app_mode != 'lite' %}<th class="numeric">Retries</th>{% endif %}<th class="cell-date">Created</th><th class="col-actions">Actions</th></tr></thead>
       <tbody>
         {% for batch in batches %}
         <tr>
-          <td>
+          <td class="cell-code">
             {% if role_can_view_batch(user, batch.batch_type) %}
             <a href="/batches/{{ batch.id }}">{{ batch.batch_number }}</a>
             {% else %}
@@ -47,14 +47,14 @@
             {% endif %}
           </td>
           <td>{{ batch.batch_type }}</td>
-          <td>{{ batch.party_name or '-' }}</td>
-          <td>{{ batch.reason_code or '-' }}</td>
+          <td class="cell-wrap">{{ batch.party_name or '-' }}</td>
+          <td class="cell-wrap">{{ batch.reason_code or '-' }}</td>
           <td><span class="status {{ batch.status|lower }}">{{ 'Sent to Master' if app_mode == 'lite' and batch.status == 'SYNCED' else 'Pending delivery' if app_mode == 'lite' and batch.status == 'PENDING_SYNC' else batch.status }}</span></td>
-          <td>{{ batch.items|length }}</td>
-          {% if app_mode != 'lite' %}<td>{{ batch.retry_count or 0 }}</td>{% endif %}
-          <td>{{ batch.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="numeric">{{ batch.items|length }}</td>
+          {% if app_mode != 'lite' %}<td class="numeric">{{ batch.retry_count or 0 }}</td>{% endif %}
+          <td class="cell-date">{{ batch.created_at.strftime('%d %b %Y %H:%M') }}</td>
           <td class="col-actions">
-            <div class="row-actions">
+            <div class="row-actions table-actions">
             {% if batch.batch_type == 'SALE' and batch.items|length > 0 and role_can_view_batch(user, batch.batch_type) %}
             <a class="button small" href="/batches/{{ batch.id }}/preinvoice.pdf">Pre-invoice</a>
             {% endif %}

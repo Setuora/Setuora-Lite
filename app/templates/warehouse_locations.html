@@ -20,7 +20,7 @@
     <p class="eyebrow">Location created</p>
     <h2>{{ created_location.code }}</h2>
     <p>{{ created_location.full_path }}</p>
-    <div class="row-actions">
+    <div class="row-actions table-actions">
       <a class="button primary" href="/warehouse/locations/labels.pdf?ids={{ created_location.id }}">Print this location label</a>
       <a class="button" href="/warehouse/locations/{{ created_location.id }}/qr.png" download="{{ created_location.code }}-qr.png">Download QR</a>
     </div>
@@ -50,12 +50,12 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Unique QR</th><th>Code</th><th>Warehouse</th><th>Level</th><th>Zone</th><th>Section</th><th>Rack</th><th>Shelf</th><th>Bin</th><th>Status</th><th>Label</th><th></th></tr></thead>
+      <thead><tr><th>Unique QR</th><th>Code</th><th>Warehouse</th><th>Level</th><th>Zone</th><th>Section</th><th>Rack</th><th>Shelf</th><th>Bin</th><th>Status</th><th>Label</th><th class="col-actions">Actions</th></tr></thead>
       <tbody>
         {% for location in locations %}
         <tr>
           <td><a href="/warehouse/locations/{{ location.id }}/qr.png" target="_blank"><img class="location-qr-thumb" src="/warehouse/locations/{{ location.id }}/qr.png" alt="QR for {{ location.code }}"></a></td>
-          <td><strong>{{ location.code }}</strong></td>
+          <td class="cell-code"><strong>{{ location.code }}</strong></td>
           <td>{{ location.warehouse }}</td><td>{{ location.warehouse_level }}</td><td>{{ location.zone }}</td><td>{{ location.section }}</td>
           <td>{{ location.rack }}</td><td>{{ location.shelf }}</td><td>{{ location.bin }}</td>
           <td><span class="status {{ 'synced' if location.active else 'failed' }}">{{ 'ACTIVE' if location.active else 'INACTIVE' }}</span></td>
@@ -65,7 +65,7 @@
               <a class="button small ghost" href="/warehouse/locations/{{ location.id }}/qr.png" download="{{ location.code }}-qr.png">PNG</a>
             </div>
           </td>
-          <td>
+          <td class="col-actions">
             <form method="post" action="/warehouse/locations/{{ location.id }}/toggle">
               <button class="button small {{ 'danger' if location.active else 'ghost' }}" type="submit">{{ 'Deactivate' if location.active else 'Activate' }}</button>
             </form>

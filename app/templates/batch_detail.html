@@ -212,26 +212,26 @@
         <tr>
           <th>Product</th>
           <th>HSN</th>
-          <th>Qty</th>
-          <th>Rate</th>
-          <th>Discount</th>
-          <th>Taxable (excl. GST)</th>
-          <th>CGST</th>
-          <th>SGST</th>
-          <th>IGST</th>
-          <th>Total</th>
+          <th class="numeric">Qty</th>
+          <th class="numeric">Rate</th>
+          <th class="numeric">Discount</th>
+          <th class="numeric">Taxable (excl. GST)</th>
+          <th class="numeric">CGST</th>
+          <th class="numeric">SGST</th>
+          <th class="numeric">IGST</th>
+          <th class="numeric">Total</th>
         </tr>
       </thead>
       <tbody id="voucher-preview-body">
         {% for line in summary.lines %}
         <tr>
-          <td>
+          <td class="cell-wrap">
             <strong>{{ line.product_name }}</strong>
             <small>{{ line.tally_stock_item_name }}</small>
           </td>
-          <td>{{ line.hsn }}</td>
-          <td>{{ line.quantity }} {{ line.unit }}</td>
-          <td>
+          <td class="cell-code">{{ line.hsn }}</td>
+          <td class="numeric">{{ line.quantity }} {{ line.unit }}</td>
+          <td class="numeric">
             {% if batch.status == 'DRAFT' and can_edit_batch %}
             <form method="post" action="/batches/{{ batch.id }}/products/{{ line.product_id }}/rate" class="inline-form compact-inline" data-autosave="/batches/{{ batch.id }}/products/{{ line.product_id }}/rate">
               <input name="rate" type="number" min="0" step="0.01" value="{{ '%.2f'|format(line.rate) }}">
@@ -241,27 +241,27 @@
             {{ '%.2f'|format(line.rate) }}
             {% endif %}
           </td>
-          <td>
+          <td class="numeric">
             {{ '%.2f'|format(line.discount_rate) }}%
             {% if line.discount_amount > 0 %}<small>-{{ '%.2f'|format(line.discount_amount) }}</small>{% endif %}
           </td>
-          <td>{{ '%.2f'|format(line.taxable_value) }}</td>
-          <td>{{ '%.2f'|format(line.cgst_amount) }}</td>
-          <td>{{ '%.2f'|format(line.sgst_amount) }}</td>
-          <td>{{ '%.2f'|format(line.igst_amount) }}</td>
-          <td>{{ '%.2f'|format(line.line_total) }}</td>
+          <td class="numeric">{{ '%.2f'|format(line.taxable_value) }}</td>
+          <td class="numeric">{{ '%.2f'|format(line.cgst_amount) }}</td>
+          <td class="numeric">{{ '%.2f'|format(line.sgst_amount) }}</td>
+          <td class="numeric">{{ '%.2f'|format(line.igst_amount) }}</td>
+          <td class="numeric">{{ '%.2f'|format(line.line_total) }}</td>
         </tr>
         {% else %}
         <tr><td colspan="10" class="empty">{{ 'Scan product QR codes to build the sale' if batch.batch_type == 'SALE' else 'Scan serials to build the voucher preview' }}</td></tr>
         {% endfor %}
       </tbody>
       <tfoot id="voucher-preview-foot" {% if not summary.lines %}hidden{% endif %}>
-        <tr><th colspan="6">Taxable value</th><td colspan="4">{{ '%.2f'|format(summary.taxable_value) }}</td></tr>
-        <tr><th colspan="6">CGST</th><td colspan="4">{{ '%.2f'|format(summary.cgst_amount) }}</td></tr>
-        <tr><th colspan="6">SGST</th><td colspan="4">{{ '%.2f'|format(summary.sgst_amount) }}</td></tr>
-        <tr><th colspan="6">IGST</th><td colspan="4">{{ '%.2f'|format(summary.igst_amount) }}</td></tr>
-        <tr><th colspan="6">Round off</th><td colspan="4">{{ '%.2f'|format(summary.round_off) }}</td></tr>
-        <tr class="grand-total"><th colspan="6">Final invoice value</th><td colspan="4">{{ '%.2f'|format(summary.final_value) }}</td></tr>
+        <tr><th colspan="6">Taxable value</th><td colspan="4" class="numeric">{{ '%.2f'|format(summary.taxable_value) }}</td></tr>
+        <tr><th colspan="6">CGST</th><td colspan="4" class="numeric">{{ '%.2f'|format(summary.cgst_amount) }}</td></tr>
+        <tr><th colspan="6">SGST</th><td colspan="4" class="numeric">{{ '%.2f'|format(summary.sgst_amount) }}</td></tr>
+        <tr><th colspan="6">IGST</th><td colspan="4" class="numeric">{{ '%.2f'|format(summary.igst_amount) }}</td></tr>
+        <tr><th colspan="6">Round off</th><td colspan="4" class="numeric">{{ '%.2f'|format(summary.round_off) }}</td></tr>
+        <tr class="grand-total"><th colspan="6">Final invoice value</th><td colspan="4" class="numeric">{{ '%.2f'|format(summary.final_value) }}</td></tr>
       </tfoot>
     </table>
   </div>
@@ -285,8 +285,8 @@
         {% for finding in batch.audit_findings %}
         <tr>
           <td><span class="status {{ finding.finding_type|lower }}">{{ finding.finding_type }}</span></td>
-          <td>{{ finding.serial_number }}</td>
-          <td>{{ finding.product_name or '-' }}</td>
+          <td class="cell-code">{{ finding.serial_number }}</td>
+          <td class="cell-wrap">{{ finding.product_name or '-' }}</td>
           <td>{{ finding.expected_status or '-' }}</td>
           <td>{{ finding.scanned_status or '-' }}</td>
         </tr>
@@ -303,17 +303,17 @@
   <div class="section-title"><h2>Scanned serials</h2></div>
   <div class="table-scroll">
     <table id="scanned-serials-table" data-batch-id="{{ batch.id }}" data-batch-type="{{ batch.batch_type }}" data-batch-status="{{ batch.status }}" data-can-edit="{{ 'true' if batch.status == 'DRAFT' and can_edit_batch else 'false' }}">
-      <thead><tr><th>Serial</th><th>Product</th><th>Product batch</th><th>Expiry</th><th>Shelf</th><th>Status</th><th>Rate</th><th></th></tr></thead>
+      <thead><tr><th>Serial</th><th>Product</th><th>Product batch</th><th class="cell-date">Expiry</th><th>Shelf</th><th>Status</th><th class="numeric">Rate</th><th class="col-actions">Actions</th></tr></thead>
       <tbody id="scanned-serials-body">
         {% for item in batch.items %}
         <tr>
-          <td>{{ item.serial.serial_number }}</td>
-          <td>{{ item.serial.product.product_name }}</td>
-          <td>
+          <td class="cell-code">{{ item.serial.serial_number }}</td>
+          <td class="cell-wrap">{{ item.serial.product.product_name }}</td>
+          <td class="cell-code">
             {{ item.serial.product_batch_number or '-' }}
             {% if item.fefo_picked %}<small>FEFO picked</small>{% endif %}
           </td>
-          <td>{{ report_date(item.serial.expiry_date) if item.serial.expiry_date else '-' }}</td>
+          <td class="cell-date">{{ report_date(item.serial.expiry_date) if item.serial.expiry_date else '-' }}</td>
           <td>
             {% if item.shelf_verified_at %}
             <strong>{{ item.shelf_location.code }}</strong>
@@ -325,7 +325,7 @@
             {% endif %}
           </td>
           <td><span class="status {{ item.serial.display_status|lower }}">{{ item.serial.display_status }}</span></td>
-          <td>
+          <td class="numeric">
             {% if batch.status == 'DRAFT' and can_edit_batch and batch.batch_type != 'AUDIT' %}
             <form method="post" action="/batches/{{ batch.id }}/items/{{ item.id }}/rate" class="inline-form compact-inline" data-autosave="/batches/{{ batch.id }}/items/{{ item.id }}/rate">
               <input name="rate" type="number" min="0" step="0.01" value="{{ '%.2f'|format(item.rate if item.rate is not none else item.serial.product.default_rate) }}">
@@ -335,7 +335,7 @@
             {{ item.rate if item.rate is not none else item.serial.product.default_rate }}
             {% endif %}
           </td>
-          <td>
+          <td class="col-actions">
             {% if batch.status == 'DRAFT' and can_edit_batch %}
             <form method="post" action="/batches/{{ batch.id }}/items/{{ item.id }}/delete">
               <button class="button small ghost" type="submit">Remove</button>
@@ -356,14 +356,14 @@
   <div class="section-title"><h2>Sync attempts</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Time</th><th>Status</th><th>Error</th><th></th></tr></thead>
+      <thead><tr><th class="cell-date">Time</th><th>Status</th><th>Error</th><th class="col-actions">Actions</th></tr></thead>
       <tbody>
         {% for attempt in batch.sync_attempts %}
         <tr>
-          <td>{{ report_date(attempt.created_at) }}</td>
+          <td class="cell-date">{{ report_date(attempt.created_at) }}</td>
           <td><span class="status {{ attempt.status|lower }}">{{ attempt.status }}</span></td>
-          <td>{{ attempt.error or '-' }}</td>
-          <td><a href="/batches/{{ batch.id }}/sync-attempts/{{ attempt.id }}">Details</a></td>
+          <td class="cell-wrap">{{ attempt.error or '-' }}</td>
+          <td class="col-actions"><a href="/batches/{{ batch.id }}/sync-attempts/{{ attempt.id }}">Details</a></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -414,5 +414,5 @@
   })();
 </script>
 <script src="/static/zxing.min.js"></script>
-<script src="/static/scanner.js?v=20260705-scan-toast-1" data-batch-id="{{ batch.id }}"></script>
+<script src="/static/scanner.js?v=20260918-editorial-1" data-batch-id="{{ batch.id }}"></script>
 {% endblock %}

@@ -50,7 +50,7 @@
   </div>
   <div class="table-scroll director-table-scroll">
     <table class="director-table product-stock-summary-table">
-      <thead><tr><th>Product</th><th>Product code</th><th>Current stock</th><th>Purchased (cumulative)</th><th>Sold (cumulative)</th><th>Last audit</th><th>Last audited qty</th><th>Nearest expiry</th></tr></thead>
+      <thead><tr><th>Product</th><th>Product code</th><th class="numeric">Current stock</th><th class="numeric">Purchased (cumulative)</th><th class="numeric">Sold (cumulative)</th><th class="cell-date">Last audit</th><th class="numeric">Last audited qty</th><th class="cell-date">Nearest expiry</th></tr></thead>
       <tbody data-dashboard-product-stock-rows>
         {% set product_rows = product_stock_rows %}
         {% include "partials/product_stock_summary_rows.html" %}
@@ -77,7 +77,7 @@
     </div>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Batch</th><th>Type</th><th>Status</th><th>Items</th></tr></thead>
+        <thead><tr><th>Batch</th><th>Type</th><th>Status</th><th class="numeric">Items</th></tr></thead>
         <tbody data-live-batches>
           {% include "partials/dashboard_batches.html" %}
         </tbody>

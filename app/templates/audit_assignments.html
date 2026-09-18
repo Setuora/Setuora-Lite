@@ -62,30 +62,30 @@
         <tr>
           <th>Product</th>
           <th>Auditor</th>
-          <th>Window (IST)</th>
+          <th class="cell-date">Window (IST)</th>
           <th>Status</th>
-          <th>Expected</th>
-          <th>Found</th>
-          <th>Remaining</th>
-          <th></th>
+          <th class="numeric">Expected</th>
+          <th class="numeric">Found</th>
+          <th class="numeric">Remaining</th>
+          <th class="col-actions">Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for row in rows %}
         <tr>
-          <td>
+          <td class="cell-wrap">
             <strong>{{ row.assignment.product.product_name }}</strong><br>
             <span class="muted">{{ row.assignment.product.product_code }}</span>
           </td>
           <td>{{ row.assignment.auditor.username }}</td>
-          <td>
+          <td class="cell-date">
             {{ row.starts_local.strftime('%d %b %Y %H:%M') }}<br>
             <span class="muted">to {{ row.ends_local.strftime('%d %b %Y %H:%M') }}</span>
           </td>
           <td><span class="status {{ row.progress.state|lower }}">{{ row.progress.state }}</span></td>
-          <td>{{ row.progress.expected }}</td>
-          <td>{{ row.progress.verified }}</td>
-          <td>{{ row.progress.pending }}</td>
+          <td class="numeric">{{ row.progress.expected }}</td>
+          <td class="numeric">{{ row.progress.verified }}</td>
+          <td class="numeric">{{ row.progress.pending }}</td>
           <td class="col-actions">
             <a class="button small" href="/batches/{{ row.latest_batch.id }}">Open audit</a>
             {% if row.progress.state == 'ACTIVE' and row.latest_batch.status != 'DRAFT' %}

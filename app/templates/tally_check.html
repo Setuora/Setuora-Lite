@@ -179,7 +179,7 @@
           </div>
           <div class="table-scroll tally-live-table-scroll">
             <table>
-              <thead><tr><th>Ledger</th><th>Group</th><th>Closing balance</th></tr></thead>
+              <thead><tr><th>Ledger</th><th>Group</th><th class="numeric">Closing balance</th></tr></thead>
               <tbody data-tally-live-ledgers>
                 <tr><td colspan="3" class="empty">Load a Tally company to see ledgers.</td></tr>
               </tbody>
@@ -194,7 +194,7 @@
           </div>
           <div class="table-scroll tally-live-table-scroll">
             <table>
-              <thead><tr><th>Date</th><th>Voucher</th><th>Party ledger</th><th>Tally user</th><th>Amount</th></tr></thead>
+              <thead><tr><th class="cell-date">Date</th><th>Voucher</th><th>Party ledger</th><th>Tally user</th><th class="numeric">Amount</th></tr></thead>
               <tbody data-tally-live-sales>
                 <tr><td colspan="5" class="empty">Load a Tally company to see sales vouchers.</td></tr>
               </tbody>
@@ -259,7 +259,7 @@
             {% set confirmation = confirmations.get(item.key) %}
             <tr data-tally-master-search-row data-tally-master-search="{{ item.master_type }} {{ item.master_name }} {{ item.source }} {{ item.detail }}">
               <td>{{ item.master_type }}</td>
-              <td>
+              <td class="cell-wrap">
                 {% if item.master_name %}
                 <strong>{{ item.master_name }}</strong>
                 <small>{{ item.detail }}</small>
@@ -516,9 +516,9 @@
           ledgerOptions.appendChild(option);
           const row = document.createElement("tr");
           row.append(
-            cell(ledger.name),
-            cell(ledger.parent),
-            cell(ledger.closing_balance, "amount")
+            cell(ledger.name, "cell-wrap"),
+            cell(ledger.parent, "cell-wrap"),
+            cell(ledger.closing_balance, "amount numeric")
           );
           ledgerBody.appendChild(row);
         });
@@ -569,9 +569,9 @@
           row.append(
             cell(voucher.date),
             cell([voucher.voucher_type, voucher.voucher_number].filter(Boolean).join(" ")),
-            cell(voucher.party_ledger),
+            cell(voucher.party_ledger, "cell-wrap"),
             cell(voucher.tally_user),
-            cell(voucher.amount, "amount")
+            cell(voucher.amount, "amount numeric")
           );
           salesBody.appendChild(row);
         });

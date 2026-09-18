@@ -5,14 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Login - {{ 'Setuora Lite' if app_mode == 'lite' else 'Setuora' }}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=20260710-table-fonts-3">
+  <link rel="stylesheet" href="/static/styles.css?v=20260918-editorial-1">
+  <link rel="stylesheet" href="/static/design-system.css?v=20260918-editorial-1">
+  <meta name="theme-color" content="#faf9f5">
 </head>
 <body class="auth-body">
   <main class="auth-shell">
+    <div class="auth-brand" aria-label="Setuora Lite"><span class="brand__mark">Setuora</span><span class="brand__edition">Lite</span></div>
     <section class="auth-panel">
       <div>
-        <h1>{{ 'Setuora Lite' if app_mode == 'lite' else 'Setuora Barcode Tally Bridge' }}</h1>
-        <p class="muted" style="margin-top:8px">
+        <h1>Welcome back.</h1>
+        <p class="muted">
           {{ 'Run local stock operations and synchronize them with Setuora Master.' if app_mode == 'lite' else 'Sign in to scan stock and sync with Tally.' }}
         </p>
       </div>

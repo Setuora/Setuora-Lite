@@ -9,13 +9,13 @@
   </div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Batch</th><th>Created by</th><th>Pending products</th><th>State</th></tr></thead>
+      <thead><tr><th>Batch</th><th>Created by</th><th class="numeric">Pending products</th><th>State</th></tr></thead>
       <tbody>
         {% for alert in shelf_alerts %}
         <tr>
-          <td><a href="/batches/{{ alert.batch.id }}">{{ alert.batch.batch_number }}</a></td>
+          <td class="cell-code"><a href="/batches/{{ alert.batch.id }}">{{ alert.batch.batch_number }}</a></td>
           <td>{{ alert.batch.user.username }}</td>
-          <td>{{ alert.pending_count }}</td>
+          <td class="numeric">{{ alert.pending_count }}</td>
           <td>
             <span class="status {{ 'failed' if alert.shelf_required else 'pending_sync' }}">
               {{ 'SHELF DUE' if alert.shelf_required else 'INCOMPLETE' }}

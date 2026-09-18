@@ -27,14 +27,14 @@
   <div class="section-title"><h2>Replacement history</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Time</th><th>Serial</th><th>Status</th><th>Message</th><th>User</th></tr></thead>
+      <thead><tr><th class="cell-date">Time</th><th>Serial</th><th>Status</th><th>Message</th><th>User</th></tr></thead>
       <tbody>
         {% for log in logs %}
         <tr>
-          <td>{{ log.created_at.strftime('%d %b %Y %H:%M') }}</td>
-          <td>{{ log.serial_number_raw }}</td>
+          <td class="cell-date">{{ log.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-code">{{ log.serial_number_raw }}</td>
           <td><span class="status {{ log.status|lower }}">{{ log.status }}</span></td>
-          <td>{{ log.message or '-' }}</td>
+          <td class="cell-wrap">{{ log.message or '-' }}</td>
           <td>{{ log.user.username }}</td>
         </tr>
         {% else %}

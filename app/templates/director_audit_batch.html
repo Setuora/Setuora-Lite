@@ -45,23 +45,23 @@
         <tr>
           <th>Product</th>
           <th>Product code</th>
-          <th>Pending</th>
-          <th>Missing</th>
-          <th>Extra</th>
-          <th>Verified</th>
-          <th>Total checked</th>
+          <th class="numeric">Pending</th>
+          <th class="numeric">Missing</th>
+          <th class="numeric">Extra</th>
+          <th class="numeric">Verified</th>
+          <th class="numeric">Total checked</th>
         </tr>
       </thead>
       <tbody>
         {% for row in report.product_rows %}
         <tr>
-          <td><strong>{{ row.product_name }}</strong></td>
-          <td>{{ row.product_code }}</td>
-          <td><span class="status {{ 'pending_sync' if row.pending else 'synced' }}">{{ row.pending }}</span></td>
-          <td><span class="status {{ 'missing' if row.missing else 'synced' }}">{{ row.missing }}</span></td>
-          <td><span class="status {{ 'extra' if row.extra else 'synced' }}">{{ row.extra }}</span></td>
-          <td>{{ row.verified }}</td>
-          <td>{{ row.total }}</td>
+          <td class="cell-wrap"><strong>{{ row.product_name }}</strong></td>
+          <td class="cell-code">{{ row.product_code }}</td>
+          <td class="numeric"><span class="status {{ 'pending_sync' if row.pending else 'synced' }}">{{ row.pending }}</span></td>
+          <td class="numeric"><span class="status {{ 'missing' if row.missing else 'synced' }}">{{ row.missing }}</span></td>
+          <td class="numeric"><span class="status {{ 'extra' if row.extra else 'synced' }}">{{ row.extra }}</span></td>
+          <td class="numeric">{{ row.verified }}</td>
+          <td class="numeric">{{ row.total }}</td>
         </tr>
         {% else %}
         <tr><td colspan="7" class="empty">No pending, missing, or extra stock in this audit</td></tr>
@@ -92,9 +92,9 @@
         {% for row in report.finding_rows %}
         <tr>
           <td><span class="status {{ row.type|lower }}">{{ row.type }}</span></td>
-          <td>{{ row.serial_number }}</td>
-          <td><strong>{{ row.product_name }}</strong></td>
-          <td>{{ row.product_code }}</td>
+          <td class="cell-code">{{ row.serial_number }}</td>
+          <td class="cell-wrap"><strong>{{ row.product_name }}</strong></td>
+          <td class="cell-code">{{ row.product_code }}</td>
           <td>{{ row.expected_status }}</td>
           <td>{{ row.scanned_status }}</td>
         </tr>

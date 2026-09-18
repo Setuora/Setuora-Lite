@@ -48,14 +48,14 @@
     <table>
       <thead>
         <tr>
-          <th>Audit date</th>
+          <th class="cell-date">Audit date</th>
           <th>Audited by</th>
           <th>Serial</th>
           <th>Product</th>
           <th>Audit batch</th>
           <th>Product batch</th>
           <th>Warehouse / location</th>
-          <th>Mfg / expiry</th>
+          <th class="cell-date">Mfg / expiry</th>
           <th>Expected status</th>
         </tr>
       </thead>
@@ -63,32 +63,32 @@
         {% for finding in findings %}
         {% set serial = finding.serial %}
         <tr>
-          <td>{{ report_date(finding.created_at) }}</td>
+          <td class="cell-date">{{ report_date(finding.created_at) }}</td>
           <td>{{ finding.batch.user.username }}</td>
-          <td>
+          <td class="cell-code">
             {% if serial %}
             <a href="/serials/{{ serial.id }}">{{ finding.serial_number }}</a>
             {% else %}
             {{ finding.serial_number }}
             {% endif %}
           </td>
-          <td>
+          <td class="cell-wrap">
             <strong>{{ finding.product_code or '-' }}</strong>
             <small>{{ finding.product_name or '-' }}</small>
           </td>
-          <td>
+          <td class="cell-code">
             {% if role_can_view_batch(user, finding.batch.batch_type) %}
             <a href="/batches/{{ finding.batch.id }}">{{ finding.batch.batch_number }}</a>
             {% else %}
             {{ finding.batch.batch_number }}
             {% endif %}
           </td>
-          <td>{{ serial.product_batch_number if serial and serial.product_batch_number else '-' }}</td>
+          <td class="cell-code">{{ serial.product_batch_number if serial and serial.product_batch_number else '-' }}</td>
           <td>
             <strong>{{ serial.warehouse if serial and serial.warehouse else '-' }}</strong>
             <small>{{ serial.location.full_path if serial and serial.location else 'No storage location' }}</small>
           </td>
-          <td>
+          <td class="cell-date">
             <strong>{{ report_date(serial.mfg_date) if serial and serial.mfg_date else '-' }}</strong>
             <small>Exp: {{ report_date(serial.expiry_date) if serial and serial.expiry_date else '-' }}</small>
           </td>

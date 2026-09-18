@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -164,8 +165,8 @@ def test_reports_page_renders_scan_and_transaction_rows():
     audit_section_start = response.text.index("<h2>Audit assignments</h2>")
     row_start = response.text.index("Audit Progress Masala", audit_section_start)
     assignment_row = response.text[row_start:response.text.index("</tr>", row_start)]
-    assert "<td>2</td>" in assignment_row
-    assert assignment_row.count("<td>1</td>") >= 2
+    assert re.search(r"<td\b[^>]*>2</td>", assignment_row)
+    assert len(re.findall(r"<td\b[^>]*>1</td>", assignment_row)) >= 2
 
 
 def test_reports_product_dropdown_filters_product_specific_rows_and_exports():

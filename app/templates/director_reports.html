@@ -38,7 +38,7 @@
     </div>
     <div class="table-scroll director-table-scroll">
       <table class="director-table director-live-table product-stock-summary-table">
-        <thead><tr><th>Product</th><th>Product code</th><th>Current stock</th><th>Purchased (cumulative)</th><th>Sold (cumulative)</th><th>Last audit</th><th>Last audited qty</th><th>Last audit missing</th><th>Last audit extra</th><th>Nearest expiry</th></tr></thead>
+        <thead><tr><th>Product</th><th>Product code</th><th class="numeric">Current stock</th><th class="numeric">Purchased (cumulative)</th><th class="numeric">Sold (cumulative)</th><th class="cell-date">Last audit</th><th class="numeric">Last audited qty</th><th class="numeric">Last audit missing</th><th class="numeric">Last audit extra</th><th class="cell-date">Nearest expiry</th></tr></thead>
         <tbody data-director-live-product-rows>
           {% set product_rows = report.product_rows %}
           {% set show_audit_variance = true %}
@@ -71,7 +71,7 @@
     </div>
     <div class="table-scroll director-table-scroll">
       <table class="director-table director-warehouse-table">
-        <thead><tr><th>Warehouse level</th><th>Warehouses</th><th>Products</th><th>Locations</th><th>Unlocated</th><th>Expiry ≤30 days</th><th>Nearest expiry</th><th>Total stock</th></tr></thead>
+        <thead><tr><th>Warehouse level</th><th class="numeric">Warehouses</th><th class="numeric">Products</th><th class="numeric">Locations</th><th class="numeric">Unlocated</th><th class="numeric">Expiry ≤30 days</th><th class="cell-date">Nearest expiry</th><th class="numeric">Total stock</th></tr></thead>
         <tbody data-director-live-warehouse-rows>
           {% include "partials/director_warehouse_rows.html" %}
         </tbody>
@@ -152,14 +152,14 @@
     <table class="director-table">
       <thead>
         <tr>
-          <th>Open</th>
+          <th class="col-actions">Open</th>
           <th>Audit batch</th>
-          <th>Date and time</th>
+          <th class="cell-date">Date and time</th>
           <th>Audited by</th>
-          <th>Products</th>
-          <th>Pending</th>
-          <th>Missing</th>
-          <th>Extra</th>
+          <th class="numeric">Products</th>
+          <th class="numeric">Pending</th>
+          <th class="numeric">Missing</th>
+          <th class="numeric">Extra</th>
         </tr>
       </thead>
       <tbody data-director-live-audit-batches>
@@ -177,7 +177,7 @@
     </div>
     <div class="table-scroll director-table-scroll">
       <table class="director-table">
-        <thead><tr><th>Product</th><th>Batch</th><th>Stock</th><th>Unsold</th><th>Risk</th></tr></thead>
+        <thead><tr><th>Product</th><th>Batch</th><th class="numeric">Stock</th><th class="numeric">Unsold</th><th>Risk</th></tr></thead>
         <tbody data-director-live-expiry-risk>
           {% include "partials/director_expiry_risk_rows.html" %}
         </tbody>
@@ -191,7 +191,7 @@
     </div>
     <div class="table-scroll director-table-scroll">
       <table class="director-table">
-        <thead><tr><th>Product</th><th>Stock</th><th>Last sale</th><th>Value</th></tr></thead>
+        <thead><tr><th>Product</th><th class="numeric">Stock</th><th class="cell-date">Last sale</th><th class="numeric">Value</th></tr></thead>
         <tbody data-director-live-dead-stock>
           {% include "partials/director_dead_stock_rows.html" %}
         </tbody>

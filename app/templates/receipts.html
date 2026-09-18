@@ -25,16 +25,16 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Date</th><th>Proof</th><th>UTR number</th><th>Status</th><th>Master response</th><th>Submitted</th></tr></thead>
+      <thead><tr><th class="cell-date">Date</th><th class="col-actions">Proof</th><th>UTR number</th><th>Status</th><th>Master response</th><th>Submitted</th></tr></thead>
       <tbody>
         {% for receipt in receipts %}
         <tr>
-          <td>{{ receipt.receipt_date.strftime('%d %b %Y') }}</td>
-          <td><a class="button small" href="/receipts/{{ receipt.id }}/proof" target="_blank" rel="noopener">View image</a></td>
-          <td>{{ receipt.utr_number or '-' }}</td>
+          <td class="cell-date">{{ receipt.receipt_date.strftime('%d %b %Y') }}</td>
+          <td class="col-actions"><a class="button small" href="/receipts/{{ receipt.id }}/proof" target="_blank" rel="noopener">View image</a></td>
+          <td class="cell-code">{{ receipt.utr_number or '-' }}</td>
           <td><span class="status {{ receipt.status|lower }}">{{ receipt.status|title }}</span><small>{{ 'Synced to Master' if receipt.synced_at else 'Waiting to sync' }}</small></td>
-          <td>{% if receipt.rejection_remarks %}{{ receipt.rejection_remarks }}{% elif receipt.status == 'APPROVED' %}Approved by {{ receipt.reviewed_by or 'Master' }}{% else %}-{% endif %}</td>
-          <td>{{ receipt.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-wrap">{% if receipt.rejection_remarks %}{{ receipt.rejection_remarks }}{% elif receipt.status == 'APPROVED' %}Approved by {{ receipt.reviewed_by or 'Master' }}{% else %}-{% endif %}</td>
+          <td class="cell-date">{{ receipt.created_at.strftime('%d %b %Y %H:%M') }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No receipts submitted yet.</td></tr>

@@ -29,11 +29,11 @@
         <tr>
           <th>Product</th>
           <th>Batch</th>
-          <th>Stock</th>
-          <th>Sales/month</th>
-          <th>Expiry</th>
-          <th>Expected sales</th>
-          <th>Unsold</th>
+          <th class="numeric">Stock</th>
+          <th class="numeric">Sales/month</th>
+          <th class="cell-date">Expiry</th>
+          <th class="numeric">Expected sales</th>
+          <th class="numeric">Unsold</th>
           <th>Risk</th>
           <th>Basis</th>
         </tr>
@@ -41,13 +41,13 @@
       <tbody>
         {% for row in expiry.risk_rows %}
         <tr>
-          <td>{{ row.product_name }}<small>{{ row.product_code }} - {{ row.warehouse }}</small></td>
-          <td>{{ row.batch }}</td>
-          <td>{{ row.stock }}</td>
-          <td>{{ row.sales_per_month }}</td>
-          <td>{{ row.expiry_date.strftime('%d %b %Y') }}<small>{{ row.months_left }} months</small></td>
-          <td>{{ row.expected_sales }}</td>
-          <td>{{ row.unsold_stock }}</td>
+          <td class="cell-wrap">{{ row.product_name }}<small>{{ row.product_code }} - {{ row.warehouse }}</small></td>
+          <td class="cell-code">{{ row.batch }}</td>
+          <td class="numeric">{{ row.stock }}</td>
+          <td class="numeric">{{ row.sales_per_month }}</td>
+          <td class="cell-date">{{ row.expiry_date.strftime('%d %b %Y') }}<small>{{ row.months_left }} months</small></td>
+          <td class="numeric">{{ row.expected_sales }}</td>
+          <td class="numeric">{{ row.unsold_stock }}</td>
           <td><span class="status {{ row.risk_class }}">{{ row.risk }}</span></td>
           <td>{{ row.risk_basis }}</td>
         </tr>
@@ -64,13 +64,13 @@
     <div class="section-title"><h2>Sleeping stock report</h2></div>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Product</th><th>Stock</th><th>Last sale</th><th>Status</th><th>Basis</th></tr></thead>
+        <thead><tr><th>Product</th><th class="numeric">Stock</th><th class="cell-date">Last sale</th><th>Status</th><th>Basis</th></tr></thead>
         <tbody>
           {% for row in expiry.sleeping_stock %}
           <tr>
-            <td>{{ row.product_name }}</td>
-            <td>{{ row.stock }}</td>
-            <td>{{ row.last_sale }}</td>
+            <td class="cell-wrap">{{ row.product_name }}</td>
+            <td class="numeric">{{ row.stock }}</td>
+            <td class="cell-date">{{ row.last_sale }}</td>
             <td><span class="status {{ row.status_class }}">{{ row.status }}</span></td>
             <td>{{ row.stock_basis }}</td>
           </tr>
@@ -85,13 +85,13 @@
     <div class="section-title"><h2>Warehouse expiry heatmap</h2></div>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Warehouse</th><th>Expiring value</th><th>Qty</th><th>Heat</th></tr></thead>
+        <thead><tr><th>Warehouse</th><th class="numeric">Expiring value</th><th class="numeric">Qty</th><th>Heat</th></tr></thead>
         <tbody>
           {% for row in expiry.warehouse_heatmap %}
           <tr>
             <td>{{ row.warehouse }}</td>
-            <td>Rs {{ '%.0f'|format(row.value) }}</td>
-            <td>{{ row.qty }}</td>
+            <td class="numeric">Rs {{ '%.0f'|format(row.value) }}</td>
+            <td class="numeric">{{ row.qty }}</td>
             <td><span class="heatmap-bar"><span style="width: {{ row.percent }}%;"></span></span></td>
           </tr>
           {% else %}

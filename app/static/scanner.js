@@ -279,15 +279,15 @@ function updateVoucherPreview(summary) {
   } else {
     lines.forEach((line) => {
       const row = document.createElement("tr");
-      const productCell = appendCell(row, "");
+      const productCell = appendCell(row, "", "cell-wrap");
       const strong = document.createElement("strong");
       strong.textContent = line.product_name || "";
       productCell.appendChild(strong);
       if (line.tally_stock_item_name)
         productCell.appendChild(createSmallText(line.tally_stock_item_name));
-      appendCell(row, line.hsn || "-");
-      appendCell(row, `${line.quantity || 0} ${line.unit || ""}`.trim());
-      const rateCell = appendCell(row, "");
+      appendCell(row, line.hsn || "-", "cell-code");
+      appendCell(row, `${line.quantity || 0} ${line.unit || ""}`.trim(), "numeric");
+      const rateCell = appendCell(row, "", "numeric");
       if (canEditVoucher && batchId) {
         rateCell.appendChild(
           createRateForm(
@@ -298,15 +298,15 @@ function updateVoucherPreview(summary) {
       } else {
         rateCell.textContent = line.rate || "0.00";
       }
-      const discountCell = appendCell(row, `${line.discount_rate || "0.00"}%`);
+      const discountCell = appendCell(row, `${line.discount_rate || "0.00"}%`, "numeric");
       if (Number(line.discount_amount || 0) > 0) {
         discountCell.appendChild(createSmallText(`-${line.discount_amount}`));
       }
-      appendCell(row, line.taxable_value || "0.00");
-      appendCell(row, line.cgst_amount || "0.00");
-      appendCell(row, line.sgst_amount || "0.00");
-      appendCell(row, line.igst_amount || "0.00");
-      appendCell(row, line.line_total || "0.00");
+      appendCell(row, line.taxable_value || "0.00", "numeric");
+      appendCell(row, line.cgst_amount || "0.00", "numeric");
+      appendCell(row, line.sgst_amount || "0.00", "numeric");
+      appendCell(row, line.igst_amount || "0.00", "numeric");
+      appendCell(row, line.line_total || "0.00", "numeric");
       voucherPreviewBody.appendChild(row);
     });
   }
@@ -329,6 +329,7 @@ function updateVoucherPreview(summary) {
     heading.textContent = label;
     const cell = document.createElement("td");
     cell.colSpan = 4;
+    cell.className = "numeric";
     cell.textContent = value || "0.00";
     row.append(heading, cell);
     voucherPreviewFoot.appendChild(row);
@@ -355,11 +356,11 @@ function updateScannedSerials(items) {
 
   rows.forEach((item) => {
     const row = document.createElement("tr");
-    appendCell(row, item.serial_number || "");
-    appendCell(row, item.product_name || "");
-    const batchCell = appendCell(row, item.product_batch_number || "-");
+    appendCell(row, item.serial_number || "", "cell-code");
+    appendCell(row, item.product_name || "", "cell-wrap");
+    const batchCell = appendCell(row, item.product_batch_number || "-", "cell-code");
     if (item.fefo_picked) batchCell.appendChild(createSmallText("FEFO picked"));
-    appendCell(row, item.expiry_date || "-");
+    appendCell(row, item.expiry_date || "-", "cell-date");
     const shelfCell = appendCell(row, "");
     if (item.shelf_code) {
       const strong = document.createElement("strong");
@@ -376,7 +377,7 @@ function updateScannedSerials(items) {
     }
     const statusCell = appendCell(row, "");
     statusCell.appendChild(createStatusBadge(item.status));
-    const rateCell = appendCell(row, "");
+    const rateCell = appendCell(row, "", "numeric");
     if (canEditScans && batchType !== "AUDIT" && batchId) {
       rateCell.appendChild(
         createRateForm(
@@ -387,7 +388,7 @@ function updateScannedSerials(items) {
     } else {
       rateCell.textContent = item.rate || "0.00";
     }
-    const actionCell = appendCell(row, "");
+    const actionCell = appendCell(row, "", "col-actions");
     if (canEditScans && batchId) {
       const formNode = document.createElement("form");
       formNode.method = "post";

@@ -1,3 +1,5 @@
+import re
+
 from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -119,7 +121,7 @@ def test_product_master_saves_and_updates_sales_discount_rate():
     assert "Available stock" in report_text
     assert "Missing stock" in report_text
     assert "Restock" in report_text
-    assert "<th>Report</th>" in report_text
+    assert re.search(r"<th\b[^>]*>Report</th>", report_text)
     assert f'data-product-open="product-report-modal-{product_id}"' in report_text
     assert f'href="/products/{product_id}/sales-report.pdf"' in report_text
     assert sales_pdf.status_code == 200

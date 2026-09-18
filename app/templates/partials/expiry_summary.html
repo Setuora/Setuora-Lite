@@ -25,14 +25,14 @@
       <div class="section-title"><h2>Critical alerts</h2></div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>Product</th><th>Batch</th><th>Qty</th><th>Days left</th></tr></thead>
+          <thead><tr><th>Product</th><th>Batch</th><th class="numeric">Qty</th><th class="numeric">Days left</th></tr></thead>
           <tbody>
             {% for row in expiry.critical_alerts[:8] %}
             <tr>
-              <td>{{ row.product_name }}<small>{{ row.warehouse }}</small></td>
-              <td>{{ row.batch }}</td>
-              <td>{{ row.qty }}</td>
-              <td><span class="status {{ row.status_class }}">{{ row.days_left }} days</span></td>
+              <td class="cell-wrap">{{ row.product_name }}<small>{{ row.warehouse }}</small></td>
+              <td class="cell-code">{{ row.batch }}</td>
+              <td class="numeric">{{ row.qty }}</td>
+              <td class="numeric"><span class="status {{ row.status_class }}">{{ row.days_left }} days</span></td>
             </tr>
             {% else %}
             <tr><td colspan="4" class="empty">No stock expiring in 90 days</td></tr>
@@ -45,14 +45,14 @@
       <div class="section-title"><h2>High risk forecast</h2></div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>Product</th><th>Stock</th><th>Sales/month</th><th>Unsold</th></tr></thead>
+          <thead><tr><th>Product</th><th class="numeric">Stock</th><th class="numeric">Sales/month</th><th class="numeric">Unsold</th></tr></thead>
           <tbody>
             {% for row in expiry.risk_rows[:8] %}
             <tr>
-              <td>{{ row.product_name }}<small>{{ row.batch }} - {{ row.months_left }} months</small></td>
-              <td>{{ row.stock }}</td>
-              <td>{{ row.sales_per_month }}</td>
-              <td><span class="status {{ row.risk_class }}">{{ row.unsold_stock }}</span></td>
+              <td class="cell-wrap">{{ row.product_name }}<small>{{ row.batch }} - {{ row.months_left }} months</small></td>
+              <td class="numeric">{{ row.stock }}</td>
+              <td class="numeric">{{ row.sales_per_month }}</td>
+              <td class="numeric"><span class="status {{ row.risk_class }}">{{ row.unsold_stock }}</span></td>
             </tr>
             {% else %}
             <tr><td colspan="4" class="empty">No expiry risk forecast yet</td></tr>

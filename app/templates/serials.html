@@ -21,16 +21,16 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Serial</th><th>Product</th><th>Batch</th><th>Expiry</th><th>Status</th><th>QR label</th></tr></thead>
+      <thead><tr><th>Serial</th><th>Product</th><th>Batch</th><th class="cell-date">Expiry</th><th>Status</th><th class="col-actions">QR label</th></tr></thead>
       <tbody>
         {% for serial in serials %}
         <tr>
-          <td><a href="/serials/{{ serial.id }}">{{ serial.serial_number }}</a></td>
-          <td>{{ serial.product.product_name }}</td>
-          <td>{{ serial.product_batch_number or '-' }}<small>{{ serial.location.full_path if serial.location else (serial.warehouse or '') }}{% if serial.warehouse %} · {{ serial.warehouse_level }}{% endif %}</small></td>
-          <td>{{ serial.expiry_date.strftime('%d %b %Y') if serial.expiry_date else '-' }}</td>
+          <td class="cell-code"><a href="/serials/{{ serial.id }}">{{ serial.serial_number }}</a></td>
+          <td class="cell-wrap">{{ serial.product.product_name }}</td>
+          <td class="cell-code">{{ serial.product_batch_number or '-' }}<small>{{ serial.location.full_path if serial.location else (serial.warehouse or '') }}{% if serial.warehouse %} · {{ serial.warehouse_level }}{% endif %}</small></td>
+          <td class="cell-date">{{ serial.expiry_date.strftime('%d %b %Y') if serial.expiry_date else '-' }}</td>
           <td><span class="status {{ serial.display_status|lower }}">{{ serial.display_status }}</span></td>
-          <td>{% if role_can(user, 'label_files') %}<a href="/serials/labels?ids={{ serial.id }}">Label</a>{% else %}-{% endif %}</td>
+          <td class="col-actions">{% if role_can(user, 'label_files') %}<a href="/serials/labels?ids={{ serial.id }}">Label</a>{% else %}-{% endif %}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No serials found</td></tr>

@@ -107,15 +107,15 @@
   </div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Serial</th><th>Product</th><th>Scanned</th><th>Received</th><th></th></tr></thead>
+      <thead><tr><th>Serial</th><th>Product</th><th>Scanned</th><th>Received</th><th class="col-actions">Actions</th></tr></thead>
       <tbody>
         {% for item in transfer.items|sort(attribute='manifest_serial_number') %}
         <tr>
-          <td><code>{{ item.manifest_serial_number }}</code></td>
-          <td>{{ item.product_code }}<small>{{ item.product_name }}</small></td>
+          <td class="cell-code"><code>{{ item.manifest_serial_number }}</code></td>
+          <td class="cell-wrap">{{ item.product_code }}<small>{{ item.product_name }}</small></td>
           <td>{{ 'Yes' if item.scanned else '-' }}</td>
           <td>{{ 'Yes' if item.received else '-' }}</td>
-          <td>
+          <td class="col-actions">
             {% if is_draft %}
             <form method="post" action="/transfers/{{ transfer.id }}/items/{{ item.id }}/delete">
               <button class="button small ghost" type="submit">Remove</button>
@@ -133,6 +133,6 @@
 
 {% if is_draft or is_receivable %}
 <script src="/static/zxing.min.js"></script>
-<script src="/static/scanner.js?v=20260729-transfers-1"></script>
+<script src="/static/scanner.js?v=20260918-editorial-1"></script>
 {% endif %}
 {% endblock %}

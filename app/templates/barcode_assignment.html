@@ -73,15 +73,15 @@
   <div class="section-title"><h2>Recent assignments</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Batch</th><th>Source</th><th>Items</th><th>Created</th><th></th></tr></thead>
+      <thead><tr><th>Batch</th><th>Source</th><th class="numeric">Items</th><th class="cell-date">Created</th><th class="col-actions">Actions</th></tr></thead>
       <tbody>
         {% for batch in batches %}
         <tr>
-          <td>{{ batch.batch_number }}</td>
+          <td class="cell-code">{{ batch.batch_number }}</td>
           <td>{{ batch.reason_code or '-' }}</td>
-          <td>{{ batch.items|length }}</td>
-          <td>{{ batch.created_at.strftime('%d %b %Y %H:%M') }}</td>
-          <td><a href="/barcode-assignment/{{ batch.id }}">Open</a></td>
+          <td class="numeric">{{ batch.items|length }}</td>
+          <td class="cell-date">{{ batch.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="col-actions"><a href="/barcode-assignment/{{ batch.id }}">Open</a></td>
         </tr>
         {% else %}
         <tr><td colspan="5" class="empty">No assignments yet</td></tr>

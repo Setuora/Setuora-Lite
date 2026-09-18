@@ -35,17 +35,17 @@
           <th>Product</th>
           <th>Category / brand</th>
           <th>HSN</th>
-          <th>GST</th>
+          <th class="numeric">GST</th>
           <th>Shelf verification</th>
           <th>Purchase QR</th>
-          <th>Report</th>
+          <th class="col-actions">Report</th>
           <th class="col-actions">Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for product in products %}
         <tr>
-          <td>
+          <td class="cell-code">
             <button
               class="product-open-link"
               type="button"
@@ -53,17 +53,17 @@
               aria-haspopup="dialog"
             >{{ product.product_code }}</button>
           </td>
-          <td>
+          <td class="cell-wrap">
             <strong class="product-list-name">{{ product.product_name }}</strong>
             {% if product.nickname %}<small>{{ product.nickname }}</small>{% endif %}
             <small>{{ product.unit }} · Rate <span data-product-row-rate="{{ product.id }}">{{ '%.2f'|format(product.default_rate or 0) }}</span></small>
           </td>
-          <td>
+          <td class="cell-wrap">
             {{ product.category or '-' }}
             {% if product.brand %}<small>{{ product.brand }}</small>{% endif %}
           </td>
-          <td data-product-row-hsn="{{ product.id }}">{{ product.hsn }}</td>
-          <td data-product-row-gst="{{ product.id }}">{{ product.gst_rate }}%</td>
+          <td data-product-row-hsn="{{ product.id }}" class="cell-code">{{ product.hsn }}</td>
+          <td data-product-row-gst="{{ product.id }}" class="numeric">{{ product.gst_rate }}%</td>
           <td>
             <span class="status active" data-product-row-shelf="{{ product.id }}">Every {{ product.shelf_verification_interval or 1 }} scans</span>
           </td>
@@ -73,7 +73,7 @@
               data-product-row-purchase-qr="{{ product.id }}"
             >{{ 'Allowed' if product.purchase_qr_print_allowed else 'Blocked' }}</span>
           </td>
-          <td>
+          <td class="col-actions">
             <button
               class="button small"
               type="button"
@@ -81,7 +81,7 @@
               aria-haspopup="dialog"
             >Report</button>
           </td>
-          <td>
+          <td class="col-actions">
             <button
               class="button small"
               type="button"
@@ -186,15 +186,15 @@
       </div>
       <div class="table-scroll product-report-sales">
         <table>
-          <thead><tr><th>Date</th><th>Serial</th><th>Sold by</th><th>Batch / reference</th><th>Tally</th></tr></thead>
+          <thead><tr><th class="cell-date">Date</th><th>Serial</th><th>Sold by</th><th>Batch / reference</th><th>Tally</th></tr></thead>
           <tbody>
             {% for sale in sales_by_product[product.id] %}
             <tr>
-              <td>{{ sale.created_at.strftime('%d %b %Y %H:%M') }}</td>
-              <td>{{ sale.serial_number or '-' }}</td>
+              <td class="cell-date">{{ sale.created_at.strftime('%d %b %Y %H:%M') }}</td>
+              <td class="cell-code">{{ sale.serial_number or '-' }}</td>
               <td>{{ sale.user.username }}</td>
-              <td>{{ sale.reference_number or (sale.batch.batch_number if sale.batch else '-') }}</td>
-              <td>{{ sale.tally_reference or '-' }}</td>
+              <td class="cell-code">{{ sale.reference_number or (sale.batch.batch_number if sale.batch else '-') }}</td>
+              <td class="cell-code">{{ sale.tally_reference or '-' }}</td>
             </tr>
             {% else %}
             <tr><td colspan="5" class="empty">No sales during this period</td></tr>

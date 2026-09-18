@@ -41,8 +41,9 @@ function clearAlert() {
   alertBox.textContent = "";
 }
 
-function cell(text, tag = "td") {
+function cell(text, tag = "td", className = "") {
   const node = document.createElement(tag);
+  if (className) node.className = className;
   node.textContent = text ?? "-";
   return node;
 }
@@ -71,20 +72,21 @@ function renderSearchResults(results) {
   const table = document.createElement("table");
   const head = document.createElement("thead");
   head.innerHTML =
-    "<tr><th>Product</th><th>Batch</th><th>Expiry</th><th>Current location</th><th>Available</th><th></th></tr>";
+    '<tr><th>Product</th><th>Batch</th><th>Expiry</th><th>Current location</th><th class="numeric">Available</th><th class="col-actions">Actions</th></tr>';
   const body = document.createElement("tbody");
   results.forEach((item) => {
     const row = document.createElement("tr");
-    const product = cell(item.product_name);
+    const product = cell(item.product_name, "td", "cell-wrap");
     const sub = document.createElement("small");
     sub.textContent = item.serial_number || item.product_code;
     product.append(sub);
     row.append(product);
-    row.append(cell(item.batch_number || "No batch"));
-    row.append(cell(item.expiry_date || "-"));
-    row.append(cell(item.source_location));
-    row.append(cell(String(item.quantity)));
+    row.append(cell(item.batch_number || "No batch", "td", "cell-code"));
+    row.append(cell(item.expiry_date || "-", "td", "cell-date"));
+    row.append(cell(item.source_location, "td", "cell-wrap"));
+    row.append(cell(String(item.quantity), "td", "numeric"));
     const action = document.createElement("td");
+    action.className = "col-actions";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "button small";
@@ -123,18 +125,19 @@ function renderBasket() {
   }
   basket.forEach((item, key) => {
     const row = document.createElement("tr");
-    const product = cell(item.product_name);
+    const product = cell(item.product_name, "td", "cell-wrap");
     const sub = document.createElement("small");
     sub.textContent = item.serial_number || item.product_code;
     product.append(sub);
     row.append(
       product,
-      cell(item.batch_number || "No batch"),
-      cell(item.source_location),
-      cell(String(item.quantity)),
+      cell(item.batch_number || "No batch", "td", "cell-code"),
+      cell(item.source_location, "td", "cell-wrap"),
+      cell(String(item.quantity), "td", "numeric"),
     );
 
     const quantityCell = document.createElement("td");
+    quantityCell.className = "numeric";
     const controls = document.createElement("div");
     controls.className = "move-quantity";
     const input = document.createElement("input");
@@ -174,6 +177,7 @@ function renderBasket() {
     row.append(quantityCell);
 
     const action = document.createElement("td");
+    action.className = "col-actions";
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "button small ghost";

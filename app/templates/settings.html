@@ -35,13 +35,13 @@
         {% for company in companies %}
         <tr class="company-row {{ 'is-active' if company.is_active else '' }}" {% if company.is_active %}data-edit-company{% endif %}>
           <td>{{ company.name }}</td>
-          <td>{{ company.tally_company_name }}</td>
+          <td class="cell-wrap">{{ company.tally_company_name }}</td>
           <td>
             {% if company.is_active %}<span class="status active">Active</span>
             {% else %}<span class="status">Saved</span>{% endif %}
           </td>
-          <td>
-            <div class="row-actions">
+          <td class="col-actions">
+            <div class="row-actions table-actions">
               {% if company.is_active %}
               <button class="button small" type="button" data-edit-company>Edit</button>
               {% else %}

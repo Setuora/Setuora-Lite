@@ -15,17 +15,17 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Transfer</th><th>Direction</th><th>Other franchise</th><th>Status</th><th>Items</th><th>Created</th><th></th></tr></thead>
+      <thead><tr><th>Transfer</th><th>Direction</th><th>Other franchise</th><th>Status</th><th class="numeric">Items</th><th class="cell-date">Created</th><th class="col-actions">Actions</th></tr></thead>
       <tbody>
         {% for transfer in transfers %}
         <tr>
-          <td><a href="/transfers/{{ transfer.id }}">{{ transfer.transfer_uuid[:8]|upper }}</a></td>
+          <td class="cell-code"><a href="/transfers/{{ transfer.id }}">{{ transfer.transfer_uuid[:8]|upper }}</a></td>
           <td>{{ transfer.direction }}</td>
-          <td>{{ transfer.peer_code }}</td>
+          <td class="cell-wrap">{{ transfer.peer_code }}</td>
           <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ') }}</span></td>
-          <td>{{ transfer.items|length }}</td>
-          <td>{{ transfer.created_at.strftime('%d %b %Y %H:%M') }}</td>
-          <td><a class="button small" href="/transfers/{{ transfer.id }}">Open</a></td>
+          <td class="numeric">{{ transfer.items|length }}</td>
+          <td class="cell-date">{{ transfer.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="col-actions"><a class="button small" href="/transfers/{{ transfer.id }}">Open</a></td>
         </tr>
         {% else %}
         <tr><td colspan="7" class="empty">No franchise transfers yet</td></tr>

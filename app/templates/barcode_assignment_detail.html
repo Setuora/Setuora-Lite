@@ -29,22 +29,22 @@
   <div class="section-title"><h2>Generated QR labels</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Serial</th><th>Product</th><th>Batch</th><th>Expiry</th><th>Status</th><th>Label</th></tr></thead>
+      <thead><tr><th>Serial</th><th>Product</th><th>Batch</th><th class="cell-date">Expiry</th><th>Status</th><th class="col-actions">Label</th></tr></thead>
       <tbody>
         {% for item in batch.items %}
         <tr>
-          <td>
+          <td class="cell-code">
             {% if role_can(user, 'serial_data') %}
             <a href="/serials/{{ item.serial.id }}">{{ item.serial.serial_number }}</a>
             {% else %}
             {{ item.serial.serial_number }}
             {% endif %}
           </td>
-          <td>{{ item.serial.product.product_code }} - {{ item.serial.product.product_name }}</td>
-          <td>{{ item.serial.product_batch_number or '-' }}<small>{{ item.serial.warehouse or '' }}{% if item.serial.warehouse %} · {{ item.serial.warehouse_level }}{% endif %}</small></td>
-          <td>{{ item.serial.expiry_date.strftime('%d %b %Y') if item.serial.expiry_date else '-' }}</td>
+          <td class="cell-wrap">{{ item.serial.product.product_code }} - {{ item.serial.product.product_name }}</td>
+          <td class="cell-code">{{ item.serial.product_batch_number or '-' }}<small>{{ item.serial.warehouse or '' }}{% if item.serial.warehouse %} · {{ item.serial.warehouse_level }}{% endif %}</small></td>
+          <td class="cell-date">{{ item.serial.expiry_date.strftime('%d %b %Y') if item.serial.expiry_date else '-' }}</td>
           <td><span class="status {{ item.serial.display_status|lower }}">{{ item.serial.display_status }}</span></td>
-          <td>{% if role_can(user, 'label_files') %}<a href="/serials/labels?ids={{ item.serial.id }}">Open</a>{% else %}-{% endif %}</td>
+          <td class="col-actions">{% if role_can(user, 'label_files') %}<a href="/serials/labels?ids={{ item.serial.id }}">Open</a>{% else %}-{% endif %}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No QR labels generated</td></tr>

@@ -120,11 +120,11 @@
         <tr>
           <th>Product</th>
           <th>Warehouse / batch</th>
-          <th>Stock</th>
-          <th>Sold</th>
-          <th>Movement ratio</th>
-          <th>Sales velocity</th>
-          <th>Stock cover</th>
+          <th class="numeric">Stock</th>
+          <th class="numeric">Sold</th>
+          <th class="numeric">Movement ratio</th>
+          <th class="numeric">Sales velocity</th>
+          <th class="numeric">Stock cover</th>
           <th>Movement</th>
           <th>Expiry risk</th>
           <th>Suggested action</th>
@@ -133,22 +133,22 @@
       <tbody>
         {% for row in rows %}
         <tr>
-          <td>
+          <td class="cell-wrap">
             <strong>{{ row.product_name }}</strong>
             <small>{{ row.product_code }}{% if row.brand %} · {{ row.brand }}{% endif %}{% if row.category %} · {{ row.category }}{% endif %}</small>
           </td>
-          <td>
+          <td class="cell-wrap">
             {{ row.warehouse }}
             <small>{{ row.franchise_level }} · Batch {{ row.batch }}</small>
           </td>
-          <td>{{ row.current_stock }}</td>
-          <td>{{ row.units_sold }}</td>
-          <td>{{ row.movement_ratio ~ '%' if row.movement_ratio is not none else 'N/A' }}</td>
-          <td>
+          <td class="numeric">{{ row.current_stock }}</td>
+          <td class="numeric">{{ row.units_sold }}</td>
+          <td class="numeric">{{ row.movement_ratio ~ '%' if row.movement_ratio is not none else 'N/A' }}</td>
+          <td class="numeric">
             {{ row.average_monthly_sales }}/month
             <small>{{ row.average_daily_sales }}/day · {{ row.average_weekly_sales }}/week</small>
           </td>
-          <td>
+          <td class="numeric">
             {% if row.estimated_days is not none %}
             {{ row.estimated_days }} days
             <small>{{ row.estimated_months }} months · {{ row.inventory_signal }}</small>
@@ -165,7 +165,7 @@
             {% endif %}
             {% if row.estimated_unsold %}<small>{{ row.estimated_unsold }} units may remain unsold</small>{% endif %}
           </td>
-          <td>{{ row.suggested_action }}</td>
+          <td class="cell-wrap">{{ row.suggested_action }}</td>
         </tr>
         {% else %}
         <tr><td colspan="10" class="empty">No stock movement matches these filters.</td></tr>
