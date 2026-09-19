@@ -123,7 +123,7 @@
         <input name="shelf_verification_interval" type="number" min="1" max="1000" step="1" value="1" required>
         <small>Always enabled. Minimum and default value: 1.</small>
       </label>
-      {% if can_manage_purchase_qr_permission %}
+      {% if can_manage_purchase_qr_permission and not master_qr_only %}
       <label class="checkline product-checkline">
         <input type="checkbox" name="purchase_qr_print_allowed" value="true">
         <span>Allow purchase QR printing<small>Purchase users can generate QR labels for this product.</small></span>
@@ -254,7 +254,7 @@
           <input name="shelf_verification_interval" type="number" min="1" max="1000" step="1" value="{{ product.shelf_verification_interval or 1 }}" required>
           <small>Always enabled. Minimum value: 1.</small>
         </label>
-        {% if can_manage_purchase_qr_permission %}
+        {% if can_manage_purchase_qr_permission and not master_qr_only %}
         <label class="checkline product-checkline">
           <input type="checkbox" name="purchase_qr_print_allowed" value="true" {{ 'checked' if product.purchase_qr_print_allowed else '' }}>
           <span>Allow purchase QR printing<small>Purchase users can generate QR labels for this product.</small></span>

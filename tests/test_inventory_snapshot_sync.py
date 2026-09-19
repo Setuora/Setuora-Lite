@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
@@ -16,6 +17,7 @@ from app.models import (
 )
 from app.services import inventory as inventory_service
 from app.services import master_sync
+from app.services import replacement as replacement_service
 from app.services.inventory import InventoryError
 from app.services.relocation import MoveItem, RelocationError, relocate_stock
 from app.services.replacement import replace_qr_serial
@@ -61,6 +63,7 @@ def _enable_lite_sync(monkeypatch, *, transport_enabled=True) -> None:
     monkeypatch.setattr(config_module, "get_settings", lambda: settings)
     monkeypatch.setattr(master_sync, "get_settings", lambda: settings)
     monkeypatch.setattr(inventory_service, "get_settings", lambda: settings)
+    monkeypatch.setattr(replacement_service, "get_settings", lambda: settings)
 
 
 def _initialize_empty_node(db) -> None:
@@ -90,12 +93,23 @@ def test_qr_replacement_enqueues_old_and_new_serial_snapshot(
     db_session.add_all([user, product, old])
     db_session.commit()
 
-    replacement = replace_qr_serial(
+    new_number = "SQR-00000000000000000000000000000099"
+    master_sync.apply_master_command(
         db_session,
-        user,
-        old.serial_number,
-        reason="Damaged label",
+        {
+            "command_id": str(uuid4()),
+            "type": "QR_REPLACE",
+            "payload": {
+                "version": 1,
+                "franchise_code": "FR01",
+                "old_serial_number": old.serial_number,
+                "new_serial_number": new_number,
+                "expected_status": SerialStatus.IN_STOCK.value,
+                "reason": "Damaged label",
+            },
+        },
     )
+    db_session.commit()
     event = db_session.scalar(
         select(MasterOutboxEvent)
         .where(MasterOutboxEvent.aggregate_type == "QR_REPLACEMENT")
@@ -105,8 +119,8 @@ def test_qr_replacement_enqueues_old_and_new_serial_snapshot(
 
     assert payload["type"] == "STOCK_SNAPSHOT"
     assert items[old.serial_number]["status"] == SerialStatus.INVALID.value
-    assert items[replacement.serial_number]["status"] == SerialStatus.IN_STOCK.value
-    assert replacement.serial_number.startswith("FR01-")
+    assert items[new_number]["status"] == SerialStatus.IN_STOCK.value
+    assert db_session.scalar(select(Serial).where(Serial.serial_number == new_number)) is not None
 
 
 @pytest.mark.parametrize("transport_enabled", [True, False])
@@ -159,7 +173,7 @@ def test_relocation_enqueues_updated_warehouse_snapshot(
 
 
 @pytest.mark.parametrize("transport_enabled", [True, False])
-def test_qr_replacement_before_initialization_rolls_back_with_clear_error(
+def test_lite_local_qr_replacement_is_denied_without_mutation(
     db_session,
     monkeypatch,
     transport_enabled,
@@ -177,7 +191,7 @@ def test_qr_replacement_before_initialization_rolls_back_with_clear_error(
     db_session.add_all([user, product, old])
     db_session.commit()
 
-    with pytest.raises(InventoryError, match="Initialize inventory"):
+    with pytest.raises(InventoryError, match="Setuora Master"):
         replace_qr_serial(
             db_session,
             user,

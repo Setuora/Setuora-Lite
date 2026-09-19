@@ -33,7 +33,6 @@ from app.routers import lite_sync as lite_sync_router
 from app.security import create_session_token
 from app.services import inventory as inventory_service
 from app.services import master_sync
-from app.services.assignment import AssignmentLine, assign_barcodes_to_existing_stock
 from app.services.inventory import (
     InventoryError,
     add_serial_to_batch,
@@ -1165,7 +1164,7 @@ def test_command_poll_accepts_master_response_wrapper_and_uses_exact_ack_body(
     assert db_session.scalar(select(func.count(LocalTransfer.id))) == 1
 
 
-def test_lite_serials_are_globally_namespaced_and_misconfiguration_is_clear(
+def test_lite_serial_generation_is_disabled_regardless_of_franchise_configuration(
     db_session,
     monkeypatch,
 ):
@@ -1178,15 +1177,15 @@ def test_lite_serials_are_globally_namespaced_and_misconfiguration_is_clear(
         lambda: _settings(franchise_code="Mysuru 07"),
     )
 
-    serial = generate_serials(db_session, product, 1)[0]
-    assert serial.serial_number == "MYSURU-07-QR-PROD-000001"
+    with pytest.raises(InventoryError, match="Setuora Master"):
+        generate_serials(db_session, product, 1)
 
     monkeypatch.setattr(
         inventory_service,
         "get_settings",
         lambda: _settings(franchise_code="change-me"),
     )
-    with pytest.raises(InventoryError, match="FRANCHISE_CODE"):
+    with pytest.raises(InventoryError, match="Setuora Master"):
         generate_serials(db_session, product, 1)
 
     monkeypatch.setattr(
@@ -1194,12 +1193,13 @@ def test_lite_serials_are_globally_namespaced_and_misconfiguration_is_clear(
         "get_settings",
         lambda: _settings(franchise_code="", master_sync_enabled=False),
     )
-    with pytest.raises(InventoryError, match="FRANCHISE_CODE"):
+    with pytest.raises(InventoryError, match="Setuora Master"):
         generate_serials(db_session, product, 1)
+    assert db_session.scalar(select(func.count(Serial.id))) == 0
 
 
 @pytest.mark.parametrize("transport_enabled", [True, False])
-def test_empty_initialization_queues_heartbeat_before_qr_assignment_snapshot(
+def test_empty_initialization_queues_heartbeat_then_receives_master_qr_without_outbox(
     db_session,
     monkeypatch,
     transport_enabled,
@@ -1225,30 +1225,37 @@ def test_empty_initialization_queues_heartbeat_before_qr_assignment_snapshot(
     assert marker_payload["items"] == []
     assert marker_payload["reason_code"] == "INITIAL_ENROLLMENT"
 
-    user = User(username="assignment-admin", password_hash="x", role="admin")
     product = _product("ASSIGN-PROD")
-    db_session.add_all([user, product])
+    db_session.add(product)
     db_session.commit()
-    batch = assign_barcodes_to_existing_stock(
+    serial_number = "SQR-" + "A" * 32
+    master_sync.apply_master_command(
         db_session,
-        user,
-        [AssignmentLine(product=product, quantity=1)],
-        notes="Existing stock assignment",
+        {
+            "command_id": "qr-allocated-after-initialization",
+            "type": "QR_ALLOCATED",
+            "payload": {
+                "version": 1,
+                "franchise_code": "BLR-01",
+                "product": {
+                    "product_code": product.product_code,
+                    "product_name": product.product_name,
+                    "tally_stock_item_name": product.tally_stock_item_name,
+                    "hsn": product.hsn,
+                    "gst_rate": product.gst_rate,
+                    "unit": product.unit,
+                    "default_rate": product.default_rate,
+                    "sales_discount_rate": product.sales_discount_rate,
+                    "active": True,
+                },
+                "serials": [{"serial_number": serial_number, "status": "GENERATED"}],
+            },
+        },
     )
-    serial = batch.items[0].serial
-    event = db_session.scalar(
-        select(MasterOutboxEvent).where(
-            MasterOutboxEvent.aggregate_id.like(f"%:{batch.batch_number}")
-        )
-    )
-
-    wire_event = json.loads(event.payload_json)["events"][0]
-    assert wire_event["type"] == "STOCK_SNAPSHOT"
-    assert wire_event["reference"] == batch.batch_number
-    assert wire_event["actor"] == user.username
-    assert wire_event["items"][0]["serial_number"] == serial.serial_number
-    assert wire_event["items"][0]["status"] == SerialStatus.IN_STOCK.value
-    assert event.id > marker.id
+    db_session.commit()
+    serial = db_session.scalar(select(Serial).where(Serial.serial_number == serial_number))
+    assert serial is not None and serial.status == SerialStatus.GENERATED.value
+    assert db_session.scalar(select(func.count(MasterOutboxEvent.id))) == 1
 
 
 def test_initial_inventory_partitions_by_exact_utf8_body_size_with_multibyte_text(

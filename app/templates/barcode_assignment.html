@@ -3,13 +3,36 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Existing stock</p>
-    <h1>Barcode Assignment</h1>
+    <p class="eyebrow">{{ 'Master sync' if master_qr_only else 'Existing stock' }}</p>
+    <h1>{{ 'QR Inventory' if master_qr_only else 'Barcode Assignment' }}</h1>
   </div>
 </section>
 
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
+{% if master_qr_only %}
+<div class="alert">Setuora Master creates QR codes for this franchise. New codes appear here after the next sync.</div>
+<section class="panel">
+  <div class="section-title"><h2>Recent QR codes</h2></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>QR serial</th><th>Product</th><th>Status</th><th class="cell-date">Received</th></tr></thead>
+      <tbody>
+        {% for serial in recent_serials %}
+        <tr>
+          <td class="cell-code">{{ serial.serial_number }}</td>
+          <td>{{ serial.product.product_code }} - {{ serial.product.product_name }}</td>
+          <td><span class="status {{ serial.status|lower }}">{{ serial.display_status }}</span></td>
+          <td class="cell-date">{{ serial.created_at.strftime('%d %b %Y %H:%M') }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="empty">No QR codes have synced yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
 <section class="split">
   <div class="panel">
     <div class="section-title"><h2>Assign to product</h2></div>
@@ -114,4 +137,5 @@
     syncProductOptions();
   })();
 </script>
+{% endif %}
 {% endblock %}

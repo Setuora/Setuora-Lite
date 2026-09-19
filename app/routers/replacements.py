@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_permission
+from app.config import get_settings
 from app.database import get_db
 from app.models import ScanLog, TransactionType
 from app.services.inventory import InventoryError
@@ -22,7 +23,7 @@ def replacement_page(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request,
         "qr_replacement.html",
-        {"request": request, "user": user, "logs": logs, "error": None, "replacement": None},
+        {"request": request, "user": user, "logs": logs, "error": None, "replacement": None, "master_qr_only": get_settings().app_mode == "lite"},
     )
 
 
@@ -36,6 +37,8 @@ def replace_qr(
     db: Session = Depends(get_db),
 ):
     user = require_permission(request, db, "barcode_replacement")
+    if get_settings().app_mode == "lite":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="QR replacements are created in Setuora Master")
     logs = db.scalars(
         select(ScanLog).where(ScanLog.action == TransactionType.QR_REPLACEMENT.value).order_by(desc(ScanLog.created_at)).limit(40)
     ).all()

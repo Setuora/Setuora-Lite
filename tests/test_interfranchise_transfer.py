@@ -22,7 +22,6 @@ from app.models import (
 )
 from app.services import inventory as inventory_service
 from app.services import master_sync
-from app.services.inventory import generate_serials
 from app.services.master_sync import apply_master_command
 from app.services.transfer import (
     TransferError,
@@ -66,12 +65,18 @@ def _seed_stock(db, count=2):
     product = _product()
     db.add_all([user, product])
     db.commit()
-    serials = generate_serials(
-        db,
-        product,
-        count,
-        initial_status=SerialStatus.IN_STOCK,
-    )
+    # These represent stock already received from Master or enrolled during
+    # migration; Lite no longer allocates QR identities itself.
+    serials = [
+        Serial(
+            serial_number=f"SQR-{index + 1:032X}",
+            product_id=product.id,
+            status=SerialStatus.IN_STOCK.value,
+        )
+        for index in range(count)
+    ]
+    db.add_all(serials)
+    db.commit()
     return user, product, serials
 
 

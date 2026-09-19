@@ -15,6 +15,12 @@ Franchise C: Lite + local event queue ── HTTPS ──┘       │
 
 Lite commits each supported inventory, transfer, receipt, or batch event locally before its background worker sends events in sequence to Master. Master authenticates each franchise with a separate node credential, records events idempotently, and provides commands that Lite polls and acknowledges. Internet loss leaves events in Lite's durable outbox for later retry. Master acceptance of an event does **not** mean its Tally voucher has completed; check voucher status on Master.
 
+New franchise QR serials are allocated in Setuora Master. Lite receives their product and serial data through the authenticated command poll and stores them locally for scanning and label printing. If Lite is offline, the records arrive when it reconnects. Create new QR labels in Master; Lite cannot allocate new serials.
+
+Lite's **QR Inventory** page lists recently received codes. Existing labels can be printed again from Lite. Request a replacement in Master; the replacement reaches Lite as a command and its completed change returns to Master through the event outbox. During initial connection, Lite may enroll stock that existed before this Master-issued QR workflow.
+
+For an existing installation, deliver all pending events for previously created Lite QR labels before upgrading Master and Lite. The new Master rejects later first-use events for serials it has not issued, except during the node's first historical inventory enrollment.
+
 The former SFTP debtor/creditor exchange assumed Tally at each franchise. Its implementation remains in the repository for migration reference but is not started by the Lite application.
 
 ## Setup

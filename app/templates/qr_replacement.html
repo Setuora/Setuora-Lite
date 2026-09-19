@@ -14,6 +14,9 @@
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 {% if replacement %}<div class="alert">Replacement created: {{ replacement.serial_number }}</div>{% endif %}
 
+{% if master_qr_only %}
+<div class="alert">Create QR replacements in Setuora Master. They will appear in Lite after sync.</div>
+{% else %}
 <section class="panel narrow">
   <form method="post" action="{{ request.url.path }}" class="stack">
     <label>Old serial<input name="old_serial_number" placeholder="SG001-000001" required></label>
@@ -22,6 +25,7 @@
     <button class="button primary full" type="submit">Replace barcode</button>
   </form>
 </section>
+{% endif %}
 
 <section class="panel">
   <div class="section-title"><h2>Replacement history</h2></div>

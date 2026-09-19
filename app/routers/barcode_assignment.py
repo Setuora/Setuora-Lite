@@ -4,6 +4,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import require_permission
+from app.config import get_settings
 from app.database import get_db
 from app.models import Batch, BatchItem, BatchType, Product, Serial, SerialStatus, WarehouseLevel
 from app.services.assignment import AssignmentLine, assign_barcodes_to_existing_stock, parse_bulk_assignment_xlsx
@@ -34,8 +35,12 @@ def _assignment_batch(db: Session, batch_id: int) -> Batch | None:
 @router.get("")
 def assignment_page(request: Request, db: Session = Depends(get_db)):
     user = require_permission(request, db, "barcode_assignment")
+    master_qr_only = get_settings().app_mode == "lite"
     products = _assignment_products(db, user)
     batches = _recent_assignment_batches(db, user)
+    recent_serials = db.scalars(
+        select(Serial).options(selectinload(Serial.product)).order_by(desc(Serial.created_at), desc(Serial.id)).limit(100)
+    ).all() if master_qr_only else []
     return templates.TemplateResponse(
         request,
         "barcode_assignment.html",
@@ -44,6 +49,8 @@ def assignment_page(request: Request, db: Session = Depends(get_db)):
             "user": user,
             "products": products,
             "batches": batches,
+            "master_qr_only": master_qr_only,
+            "recent_serials": recent_serials,
             "warehouse_levels": [level.value for level in WarehouseLevel],
             "error": None,
         },
@@ -66,6 +73,8 @@ def generate_assignment(
     db: Session = Depends(get_db),
 ):
     user = require_permission(request, db, "barcode_assignment")
+    if get_settings().app_mode == "lite":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="QR codes are generated in Setuora Master")
     product = db.get(Product, product_id)
     if not product:
         return _assignment_error(request, db, user, "Product not found")
@@ -111,6 +120,8 @@ def bulk_assignment(
     db: Session = Depends(get_db),
 ):
     user = require_permission(request, db, "barcode_assignment")
+    if get_settings().app_mode == "lite":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="QR codes are generated in Setuora Master")
     try:
         data = upload.file.read(MAX_BULK_ASSIGNMENT_UPLOAD_BYTES + 1)
         if len(data) > MAX_BULK_ASSIGNMENT_UPLOAD_BYTES:

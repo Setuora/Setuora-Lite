@@ -4,6 +4,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_permission, require_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import InventoryTransaction, Product, Role, Serial, SerialStatus, User, WarehouseLevel
 from app.services.assignment import AssignmentLine, assign_barcodes_to_existing_stock
@@ -73,6 +74,7 @@ def product_page_context(db: Session, user: User, rows: list[Product], q: str, e
         "warehouse_levels": [level.value for level in WarehouseLevel],
         "q": q,
         "error": error,
+        "master_qr_only": get_settings().app_mode == "lite",
     }
 
 
@@ -377,6 +379,8 @@ def generate_product_serials(
     db: Session = Depends(get_db),
 ):
     user = require_user(request, db)
+    if get_settings().app_mode == "lite":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="QR codes are generated in Setuora Master")
     if not user_can_open_product_generate(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
     product = db.get(Product, product_id)

@@ -1118,6 +1118,7 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
         # Local import avoids a module cycle: transfer event creation uses the
         # generic outbox helper above.
         from app.services.receipts import apply_receipt_review_command
+        from app.services.master_qr import apply_qr_allocated_command, apply_qr_replace_command
         from app.services.transfer import (
             apply_transfer_available_command,
             apply_transfer_receipt_command,
@@ -1129,6 +1130,10 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
             apply_transfer_receipt_command(db, payload)
         elif command_type == "RECEIPT_REVIEWED":
             apply_receipt_review_command(db, payload)
+        elif command_type == "QR_ALLOCATED":
+            apply_qr_allocated_command(db, payload)
+        elif command_type == "QR_REPLACE":
+            apply_qr_replace_command(db, payload, command_id)
         else:
             raise MasterSyncError(f"Unsupported Master command type: {command_type}.")
     except Exception as exc:

@@ -517,6 +517,8 @@ def generate_serials(
     *,
     commit: bool = True,
 ) -> list[Serial]:
+    if get_settings().app_mode == "lite":
+        raise InventoryError("QR codes are generated in Setuora Master and synced to Lite")
     if quantity < 1:
         raise InventoryError("Quantity must be at least 1")
     if quantity > 5000:

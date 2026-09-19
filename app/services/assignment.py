@@ -10,11 +10,11 @@ from openpyxl import load_workbook
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import Batch, BatchItem, BatchStatus, BatchType, Product, ScanLog, Serial, SerialStatus, TransactionType, User, WarehouseLevel
 from app.services.change_audit import record_change
 from app.services.expiry import parse_optional_date
 from app.services.inventory import InventoryError, create_batch, generate_serials, log_inventory_transaction, normalize_serial
-from app.services.master_sync import MasterSyncError, enqueue_batch_submitted_event
 
 
 MAX_ASSIGNMENT_QUANTITY = 5000
@@ -148,6 +148,8 @@ def assign_barcodes_to_existing_stock(
     source: str = "MANUAL",
     initial_status: SerialStatus = SerialStatus.IN_STOCK,
 ) -> Batch:
+    if get_settings().app_mode == "lite":
+        raise InventoryError("QR codes are generated in Setuora Master and synced to Lite")
     total = sum(line.quantity for line in lines)
     if total < 1:
         raise InventoryError("Quantity must be at least 1")
@@ -214,20 +216,8 @@ def assign_barcodes_to_existing_stock(
             )
         batch.status = BatchStatus.CLOSED.value
         batch.submitted_at = batch.created_at
-        from app.config import get_settings
-
-        if get_settings().app_mode == "lite":
-            # QR generation remains a Lite-only operation.  Master receives
-            # the resulting serial state through the durable event outbox.
-            db.flush()
-            enqueue_batch_submitted_event(db, batch, user=user)
-            batch.synced_at = None
-        else:
-            batch.synced_at = batch.created_at
+        batch.synced_at = batch.created_at
         db.commit()
-    except MasterSyncError as exc:
-        db.rollback()
-        raise InventoryError(str(exc)) from exc
     except Exception:
         db.rollback()
         raise
