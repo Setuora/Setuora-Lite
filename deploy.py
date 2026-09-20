@@ -234,12 +234,12 @@ def _prepare_environment() -> None:
         for protected in (PROJECT_ROOT / "data", PROJECT_ROOT / "logs"):
             if getattr(protected.lstat(), "st_file_attributes", 0) & WINDOWS_REPARSE_POINT:
                 raise DeploymentError(f"{protected.name} is a linked folder; setup will not change its permissions.")
-            _run(
-                [
-                    "icacls.exe", str(protected), "/inheritance:r", "/grant:r",
-                    "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q", "/L",
-                ]
-            )
+            # Give existing files direct access before removing inherited ACEs.
+            # A recursive grant with (OI)(CI) alone can leave a database file
+            # with an empty ACL, including while the SYSTEM task owns it.
+            _run(["icacls.exe", str(protected), "/grant", "*S-1-5-18:F", "*S-1-5-32-544:F", "/T", "/Q", "/L"])
+            _run(["icacls.exe", str(protected), "/grant", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q", "/L"])
+            _run(["icacls.exe", str(protected), "/inheritance:r", "/T", "/Q", "/L"])
             _run(["icacls.exe", str(protected), "/remove:g", "*S-1-5-32-545", "*S-1-5-11", "*S-1-1-0", "/T", "/Q", "/L"])
 
 
@@ -308,7 +308,7 @@ def _remove_legacy_lan_firewall() -> None:
         "$ErrorActionPreference='Stop'; "
         f"$existing=Get-NetFirewallRule -Name '{FIREWALL_RULE_NAME}' "
         "-ErrorAction SilentlyContinue; if ($existing) { Remove-NetFirewallRule "
-        f"-Name '{FIREWALL_RULE_NAME}' }}"
+        f"-Name '{FIREWALL_RULE_NAME}' }}; exit 0"
     )
     _run(
         [
@@ -483,20 +483,13 @@ def _secure_code_permissions() -> None:
             continue
         if getattr(child.lstat(), "st_file_attributes", 0) & WINDOWS_REPARSE_POINT:
             raise DeploymentError(f"Installed code contains a linked path: {child.name}")
-        grants = (
-            ["*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-32-545:(OI)(CI)RX"]
-            if child.is_dir()
-            else ["*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:RX"]
-        )
-        command = ["icacls.exe", str(child), "/inheritance:r", "/grant:r", *grants]
         if child.is_dir():
-            command.append("/T")
-        command.append("/Q")
-        command.append("/L")
-        _run(command)
-        if child.is_dir():
+            _run(["icacls.exe", str(child), "/grant", "*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:RX", "/T", "/Q", "/L"])
+            _run(["icacls.exe", str(child), "/grant", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-32-545:(OI)(CI)RX", "/T", "/Q", "/L"])
+            _run(["icacls.exe", str(child), "/inheritance:r", "/T", "/Q", "/L"])
             _run(["icacls.exe", str(child), "/remove:g", "*S-1-5-11", "*S-1-1-0", "/T", "/Q", "/L"])
         else:
+            _run(["icacls.exe", str(child), "/inheritance:r", "/grant:r", "*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:RX", "/Q", "/L"])
             _run(["icacls.exe", str(child), "/remove:g", "*S-1-5-11", "*S-1-1-0", "/Q", "/L"])
 
 

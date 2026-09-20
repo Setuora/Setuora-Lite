@@ -227,10 +227,17 @@ switch ($Case) {
             '/' = [pscustomobject]@{ Proxy = 'http://127.0.0.1:8081' }
             '/api/v1/' = [pscustomobject]@{ Proxy = 'http://127.0.0.1:8000' }
         }
-        $config = [pscustomobject]@{ Web = [pscustomobject]@{
+        $config = [pscustomobject]@{ TCP = [pscustomobject]@{
+            '443' = [pscustomobject]@{ HTTPS = $true }
+        }; Web = [pscustomobject]@{
             'lite.tailnet.ts.net:443' = [pscustomobject]@{ Handlers = $handlers }
         } }
         Assert-SetuoraServeRoute $config 'lite.tailnet.ts.net' $true 8081
+        $config.TCP.PSObject.Properties['443'].Value = [pscustomobject]@{ TCPForward = '127.0.0.1:9000' }
+        $caught = $false
+        try { Assert-SetuoraServeRoute $config 'lite.tailnet.ts.net' $true 8081 } catch { $caught = $true }
+        Assert-Equal $caught $true 'A TCP forward on HTTPS port must be rejected'
+        $config.TCP.PSObject.Properties['443'].Value = [pscustomobject]@{ HTTPS = $true }
         $handlers.PSObject.Properties['/'].Value.Proxy = 'http://127.0.0.1:9999'
         $caught = $false
         try { Assert-SetuoraServeRoute $config 'lite.tailnet.ts.net' $true 8081 } catch { $caught = $true }

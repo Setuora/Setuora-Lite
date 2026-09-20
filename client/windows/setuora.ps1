@@ -165,10 +165,16 @@ function Install-SetuoraCaddy([switch]$Upgrade) {
     if ((Get-Item -LiteralPath $CaddyRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw "The Caddy installation folder is a linked path. Setup stopped before changing permissions."
     }
+    # Existing Caddy files need direct rights before inheritance is removed.
     $code = Invoke-SetuoraNative "icacls.exe" @(
-        $CaddyRoot, "/inheritance:r", "/grant:r",
-        "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q", "/L"
+        $CaddyRoot, "/grant", "*S-1-5-18:F", "*S-1-5-32-544:F", "/T", "/Q", "/L"
     )
+    if ($code -ne 0) { throw "Caddy files could not be secured for the Windows SYSTEM task." }
+    $code = Invoke-SetuoraNative "icacls.exe" @(
+        $CaddyRoot, "/grant", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q", "/L"
+    )
+    if ($code -ne 0) { throw "Caddy files could not be secured for the Windows SYSTEM task." }
+    $code = Invoke-SetuoraNative "icacls.exe" @($CaddyRoot, "/inheritance:r", "/T", "/Q", "/L")
     if ($code -ne 0) { throw "Caddy files could not be secured for the Windows SYSTEM task." }
     $code = Invoke-SetuoraNative "icacls.exe" @(
         $CaddyRoot, "/remove:g", "*S-1-5-32-545", "*S-1-5-11", "*S-1-1-0", "/T", "/Q", "/L"
@@ -338,7 +344,12 @@ function Assert-SetuoraServeRoute([object]$Config, [string]$TailnetName, [bool]$
     }
     if ($Config.TCP) {
         foreach ($entry in $Config.TCP.PSObject.Properties) {
-            if ($entry.Name -match '(^|:)443$') { throw "Tailscale port 443 is already used by a TCP route." }
+            # Tailscale Serve records its HTTPS web listener under TCP as well.
+            # Only a TCP forward conflicts with Lite's web route.
+            if ($entry.Name -match '(^|:)443$' -and
+                ($entry.Value.HTTPS -ne $true -or $entry.Value.TCPForward)) {
+                throw "Tailscale port 443 is already used by a TCP route."
+            }
         }
     }
     $route = $null

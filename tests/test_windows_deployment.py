@@ -298,7 +298,8 @@ def test_server_runner_and_caddy_template_follow_saved_ports(monkeypatch):
     runner = (PROJECT_ROOT / "scripts/windows/run-server.cmd").read_text(encoding="utf-8")
     assert "deploy.py serve" in runner
     template = (PROJECT_ROOT / "scripts/windows/Caddyfile.lite").read_text(encoding="utf-8")
-    assert "127.0.0.1:__CADDY_PORT__" in template
+    assert ":__CADDY_PORT__" in template
+    assert "bind 127.0.0.1" in template
     assert "127.0.0.1:__APP_PORT__" in template
 
 

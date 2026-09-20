@@ -13,21 +13,31 @@ function Test-Administrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Set-CodeAcl([string]$Path, [switch]$Recursive) {
-    $inheritance = if (Test-Path -LiteralPath $Path -PathType Leaf) { '' } else { '(OI)(CI)' }
-    $arguments = @(
-        $Path, '/inheritance:r', '/remove:g', '*S-1-1-0', '*S-1-5-11', '/grant:r',
-        "*S-1-5-18:${inheritance}F", "*S-1-5-32-544:${inheritance}F",
-        "*S-1-5-32-545:${inheritance}RX", '/Q', '/L'
-    )
-    if ($Recursive) { $arguments += '/T' }
+function Invoke-CheckedCodeAcl([string]$Path, [string[]]$Arguments) {
     $oldPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        & icacls.exe @arguments | Out-Null
+        & icacls.exe @Arguments | Out-Null
         $code = $LASTEXITCODE
     } finally { $ErrorActionPreference = $oldPreference }
     if ($code -ne 0) { throw "Could not protect application files at $Path (icacls exit $code)." }
+}
+
+function Set-CodeAcl([string]$Path, [switch]$Recursive) {
+    if ($Recursive) {
+        # Give existing files explicit rights before removing inherited ACEs.
+        Invoke-CheckedCodeAcl $Path @($Path, '/grant', '*S-1-5-18:F', '*S-1-5-32-544:F', '*S-1-5-32-545:RX', '/T', '/Q', '/L')
+        Invoke-CheckedCodeAcl $Path @($Path, '/grant', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F', '*S-1-5-32-545:(OI)(CI)RX', '/T', '/Q', '/L')
+        Invoke-CheckedCodeAcl $Path @($Path, '/inheritance:r', '/T', '/Q', '/L')
+        Invoke-CheckedCodeAcl $Path @($Path, '/remove:g', '*S-1-1-0', '*S-1-5-11', '/T', '/Q', '/L')
+    } else {
+        $inheritance = if (Test-Path -LiteralPath $Path -PathType Leaf) { '' } else { '(OI)(CI)' }
+        Invoke-CheckedCodeAcl $Path @(
+            $Path, '/inheritance:r', '/remove:g', '*S-1-1-0', '*S-1-5-11', '/grant:r',
+            "*S-1-5-18:${inheritance}F", "*S-1-5-32-544:${inheritance}F",
+            "*S-1-5-32-545:${inheritance}RX", '/Q', '/L'
+        )
+    }
 }
 
 function Protect-Checkout {
