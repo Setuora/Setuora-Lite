@@ -5,6 +5,7 @@ __pycache__/
 venv/
 .uv-cache/
 .env
+.runtime-ports.json
 data/*.db
 data/*.db-*
 data/*.db-shm

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("menu", "setup", "preflight", "start", "stop", "status", "open", "logs", "update", "update-runtime", "help")]
+    [ValidateSet("menu", "setup", "preflight", "start", "stop", "status", "open", "logs", "update", "update-runtime", "uninstall", "help")]
     [string]$Command = "menu",
     [switch]$Elevated,
     [switch]$PauseAfter,
@@ -220,6 +220,19 @@ function Stop-SetuoraCaddy {
     throw "The Setuora Caddy process did not stop. Close it before replacing or restarting Caddy."
 }
 
+function Get-SetuoraSavedPorts {
+    $path = Join-Path $ApplicationRoot '.runtime-ports.json'
+    if (-not (Test-Path -LiteralPath $path)) { return [pscustomobject]@{ web_port = 8000; caddy_port = 8080 } }
+    try {
+        $ports = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        foreach ($port in @($ports.web_port, $ports.caddy_port)) {
+            $parsed = 0
+            if (-not [int]::TryParse([string]$port, [ref]$parsed) -or $parsed -lt 1024 -or $parsed -gt 65535) { throw 'Invalid port' }
+        }
+        return $ports
+    } catch { throw 'The saved Lite ports are unreadable. Run Setup / repair.' }
+}
+
 function Initialize-SetuoraPrivateWeb([switch]$Upgrade) {
     $tailscale = Get-SetuoraTailscale
     if (-not $tailscale) { throw "Tailscale is missing. Run Setup / repair again." }
@@ -232,12 +245,18 @@ function Initialize-SetuoraPrivateWeb([switch]$Upgrade) {
     if ($code -ne 0) { throw "The private HTTPS hostname could not be added to TRUSTED_HOSTS." }
     $code = Invoke-SetuoraDeployment "start"
     if ($code -ne 0) { throw "Lite could not restart with its private HTTPS hostname." }
+    $previousPorts = Get-SetuoraSavedPorts
     $binary = Install-SetuoraCaddy -Upgrade:$Upgrade
+    Stop-SetuoraCaddy
+    $code = Invoke-SetuoraDeployment "configure-caddy-port"
+    if ($code -ne 0) { throw "A free Caddy localhost port could not be selected." }
+    $ports = Get-SetuoraSavedPorts
     $config = Join-Path $CaddyRoot "Caddyfile"
-    Copy-Item -LiteralPath (Join-Path $ApplicationRoot "scripts\windows\Caddyfile.lite") -Destination $config -Force
+    $template = Get-Content -LiteralPath (Join-Path $ApplicationRoot "scripts\windows\Caddyfile.lite") -Raw
+    $content = $template.Replace('__CADDY_PORT__', [string]$ports.caddy_port).Replace('__APP_PORT__', [string]$ports.web_port)
+    [IO.File]::WriteAllText($config, $content, (New-Object System.Text.UTF8Encoding($false)))
     $code = Invoke-SetuoraNative $binary @("validate", "--config", $config, "--adapter", "caddyfile")
     if ($code -ne 0) { throw "The Caddy configuration is invalid." }
-    Stop-SetuoraCaddy
     $action = New-ScheduledTaskAction -Execute $binary -Argument ('run --config "' + $config + '" --adapter caddyfile')
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -247,20 +266,21 @@ function Initialize-SetuoraPrivateWeb([switch]$Upgrade) {
     $ready = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         try {
-            $response = Invoke-RestMethod -Uri "http://127.0.0.1:8080/health" -TimeoutSec 2
+            $response = Invoke-RestMethod -Uri "http://127.0.0.1:$($ports.caddy_port)/health" -TimeoutSec 2
             if ($response.status -eq "ok" -and $response.role -eq "lite") { $ready = $true; break }
         } catch { Start-Sleep -Seconds 1 }
     }
-    if (-not $ready) { throw "Caddy did not proxy Lite on localhost:8080. Check the $CaddyTaskName task status and run Setup / repair." }
+    if (-not $ready) { throw "Caddy did not proxy Lite on localhost:$($ports.caddy_port). Check the $CaddyTaskName task status and run Setup / repair." }
     Write-Host "Enabling private HTTPS through Tailscale Serve..." -ForegroundColor Cyan
     $serve = Get-SetuoraServeConfig $tailscale
-    Assert-SetuoraServeRoute $serve $tailnetHost $false
+    Assert-SetuoraServeRoute $serve $tailnetHost $false $ports.caddy_port $previousPorts.caddy_port
     $routeKey = "$($tailnetHost):443"
-    if (-not ($serve.Web -and $serve.Web.PSObject.Properties[$routeKey])) {
-        $code = Invoke-SetuoraNative $tailscale @("serve", "--bg", "--https=443", "http://127.0.0.1:8080")
+    $rootRoute = if ($serve.Web -and $serve.Web.PSObject.Properties[$routeKey]) { $serve.Web.PSObject.Properties[$routeKey].Value.Handlers.PSObject.Properties['/'] } else { $null }
+    if (-not $rootRoute -or $rootRoute.Value.Proxy -ne "http://127.0.0.1:$($ports.caddy_port)") {
+        $code = Invoke-SetuoraNative $tailscale @("serve", "--bg", "--https=443", "--set-path=/", "http://127.0.0.1:$($ports.caddy_port)")
         if ($code -ne 0) { throw "Tailscale Serve could not enable HTTPS. Complete any HTTPS approval shown above, then run Setup / repair again." }
     }
-    Assert-SetuoraServeRoute (Get-SetuoraServeConfig $tailscale) $tailnetHost $true
+    Assert-SetuoraServeRoute (Get-SetuoraServeConfig $tailscale) $tailnetHost $true $ports.caddy_port
     Write-Host "Staff HTTPS address: https://$tailnetHost" -ForegroundColor Green
     Write-Host "Join each staff PC to this tailnet, then open this address for camera scanning."
 }
@@ -306,7 +326,8 @@ function Get-SetuoraServeConfig([string]$Tailscale) {
     } catch { throw "Tailscale returned unreadable Serve settings. Setup stopped to avoid replacing another route." }
 }
 
-function Assert-SetuoraServeRoute([object]$Config, [string]$TailnetName, [bool]$MustExist) {
+function Assert-SetuoraServeRoute([object]$Config, [string]$TailnetName, [bool]$MustExist, [int]$CaddyPort = 0, [int]$PreviousPort = 0) {
+    if ($CaddyPort -eq 0) { $CaddyPort = (Get-SetuoraSavedPorts).caddy_port }
     $routeKey = "$($TailnetName):443"
     if ($Config.AllowFunnel) {
         foreach ($entry in $Config.AllowFunnel.PSObject.Properties) {
@@ -333,10 +354,15 @@ function Assert-SetuoraServeRoute([object]$Config, [string]$TailnetName, [bool]$
         if ($MustExist) { throw "The Setuora Lite Tailscale Serve route is missing. Run Setup / repair." }
         return
     }
-    $handlers = @($route.Handlers.PSObject.Properties)
-    if ($handlers.Count -ne 1 -or $handlers[0].Name -ne "/" -or
-        $handlers[0].Value.Proxy -ne "http://127.0.0.1:8080") {
-        throw "Tailscale HTTPS port 443 has a different Serve route. Setup stopped without overwriting it."
+    $rootHandler = if ($route.Handlers) { $route.Handlers.PSObject.Properties['/'] } else { $null }
+    if (-not $rootHandler) {
+        if ($MustExist) { throw "The Setuora Lite Tailscale Serve root route is missing. Run Setup / repair." }
+        return
+    }
+    $allowed = @("http://127.0.0.1:$CaddyPort")
+    if ($PreviousPort -gt 0) { $allowed += "http://127.0.0.1:$PreviousPort" }
+    if ($rootHandler.Value.Proxy -notin $allowed) {
+        throw "Tailscale HTTPS root has a different Serve route. Setup stopped without overwriting it."
     }
 }
 
@@ -503,18 +529,26 @@ function Install-SetuoraUpdate {
 function Show-SetuoraHelp {
     Write-Host "$ProductName controls"
     Write-Host "Double-click setuora.bat to open the menu."
-    Write-Host "Commands: setup, start, stop, status, open, logs, preflight, update, help"
+    Write-Host "Commands: setup, start, stop, status, open, logs, preflight, update, uninstall, help"
     Write-Host "Setup, Start, Stop, Check configuration and Update request Administrator access."
     Write-Host "Source updates use Git. Installed copies ask you to choose a downloaded installer."
     Write-Host "Browser: $BrowserUrl"
 }
 
 function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @()) {
-    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "logs")) {
+    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "uninstall", "logs")) {
         if (-not (Test-SetuoraAdministrator)) { return Invoke-SetuoraElevated $Action $ExtraArguments }
     }
     switch ($Action) {
         "help" { Show-SetuoraHelp; return 0 }
+        "uninstall" {
+            $scriptPath = Join-Path $ApplicationRoot 'scripts\windows\uninstall.ps1'
+            if (-not (Test-Path -LiteralPath $scriptPath)) { throw 'The removal script is missing. Update this installation before removing it.' }
+            Set-Location -LiteralPath $env:ProgramData
+            $code = Invoke-SetuoraNative 'powershell.exe' @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath, '-Product', 'Lite')
+            if ($code -eq 0) { $script:Uninstalled = $true }
+            return $code
+        }
         "setup" {
             $code = Invoke-SetuoraDeployment "setup" $ExtraArguments
             if ($code -ne 0) { return $code }
@@ -578,21 +612,23 @@ function Show-SetuoraMenu {
         }
         Write-Host "  [7] View recent logs"
         Write-Host "  [8] Check configuration"
+        Write-Host "  [9] Remove this installation (preserve recovery backup)"
         Write-Host "  [0] Exit"
         Write-Host ""
         Write-Host "  Closing this menu leaves Setuora running."
-        $selection = Read-Host "Choose an option (0-8)"
+        $selection = Read-Host "Choose an option (0-9)"
         $action = switch ($selection) {
             "1" { "open" }; "2" { "start" }; "3" { "stop" }; "4" { "status" }
-            "5" { "setup" }; "6" { "update" }; "7" { "logs" }; "8" { "preflight" }
+            "5" { "setup" }; "6" { "update" }; "7" { "logs" }; "8" { "preflight" }; "9" { "uninstall" }
             "0" { return 0 }
             default { "" }
         }
         if (-not $action) {
-            Write-Host "Choose a number from 0 to 8." -ForegroundColor Yellow
+            Write-Host "Choose a number from 0 to 9." -ForegroundColor Yellow
         } else {
             try {
                 $code = Invoke-SetuoraCommand $action
+                if ($action -eq 'uninstall' -and $code -eq 0) { return 0 }
                 if ($code -ne 0) { Write-Host "The action did not complete (exit $code). Review the message above; use View recent logs for server errors." -ForegroundColor Yellow }
             } catch {
                 Write-Host $_.Exception.Message -ForegroundColor Red
@@ -614,5 +650,5 @@ try {
     Write-Host $_.Exception.Message -ForegroundColor Red
     $exitCode = 1
 }
-if ($PauseAfter) { $null = Read-Host "Press Enter to close this Administrator window" }
+if ($PauseAfter -and -not $script:Uninstalled) { $null = Read-Host "Press Enter to close this Administrator window" }
 exit $exitCode

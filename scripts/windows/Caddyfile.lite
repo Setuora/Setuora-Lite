@@ -3,8 +3,8 @@
 	auto_https off
 }
 
-http://127.0.0.1:8080 {
-	reverse_proxy 127.0.0.1:8000 {
+http://127.0.0.1:__CADDY_PORT__ {
+	reverse_proxy 127.0.0.1:__APP_PORT__ {
 		header_up X-Forwarded-Proto https
 	}
 }

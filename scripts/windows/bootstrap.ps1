@@ -146,9 +146,6 @@ try {
     if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
         throw 'This release needs an x64 Windows 10 or 11 computer. The locked Python runtime does not support Windows ARM64 or 32-bit.'
     }
-    if (Test-Task 'Setuora-Master') {
-        throw 'Setuora Master already runs on this computer. Master and Lite both use port 8000; install them on separate computers.'
-    }
     if (Test-Path -LiteralPath (Join-Path $PackagedRoot '.env')) {
         throw "A packaged Lite is already installed in $PackagedRoot. Update it with its release installer; this Git installer will not replace it."
     }

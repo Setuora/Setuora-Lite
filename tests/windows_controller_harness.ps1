@@ -14,6 +14,7 @@ $originalUpdate = (Get-Command Update-SetuoraSource).ScriptBlock
 $originalCommand = (Get-Command Invoke-SetuoraCommand).ScriptBlock
 $originalTailnet = (Get-Command Initialize-SetuoraTailnet).ScriptBlock
 $originalTailnetCheck = (Get-Command Test-SetuoraTailnetReady).ScriptBlock
+$originalServeRoute = (Get-Command Assert-SetuoraServeRoute).ScriptBlock
 $ApplicationRoot = [IO.Path]::GetTempPath()
 $ControllerPath = "C:\Warehouse & Team\O'Neil\setuora.ps1"
 $ProductName = 'Setuora test'
@@ -68,7 +69,7 @@ function Read-Host([string]$Prompt) {
 switch ($Case) {
     'parse' { if ($definitions.Count -lt 10) { throw 'Expected all shared-controller function definitions' } }
     'dispatch' {
-        foreach ($action in @('setup', 'start', 'stop', 'preflight', 'update', 'update-runtime', 'logs')) {
+        foreach ($action in @('setup', 'start', 'stop', 'preflight', 'update', 'update-runtime', 'uninstall', 'logs')) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 17 "$action forwards elevation exit code"
             Assert-Equal $script:Calls @("elevate:$action") "$action requests elevation without deploying locally"
@@ -220,6 +221,37 @@ switch ($Case) {
         Test-SetuoraTailnetReady -SkipMasterCheck
         Assert-Equal $script:Calls @('tailscale:status', 'https:health') 'Read-only status checks HTTPS without reading protected settings'
     }
+    'serve-route' {
+        Set-Item Function:Assert-SetuoraServeRoute -Value $originalServeRoute
+        $handlers = [pscustomobject]@{
+            '/' = [pscustomobject]@{ Proxy = 'http://127.0.0.1:8081' }
+            '/api/v1/' = [pscustomobject]@{ Proxy = 'http://127.0.0.1:8000' }
+        }
+        $config = [pscustomobject]@{ Web = [pscustomobject]@{
+            'lite.tailnet.ts.net:443' = [pscustomobject]@{ Handlers = $handlers }
+        } }
+        Assert-SetuoraServeRoute $config 'lite.tailnet.ts.net' $true 8081
+        $handlers.PSObject.Properties['/'].Value.Proxy = 'http://127.0.0.1:9999'
+        $caught = $false
+        try { Assert-SetuoraServeRoute $config 'lite.tailnet.ts.net' $true 8081 } catch { $caught = $true }
+        Assert-Equal $caught $true 'A foreign root route must not be overwritten'
+        $handlers.PSObject.Properties.Remove('/')
+        Assert-SetuoraServeRoute $config 'lite.tailnet.ts.net' $false 8081
+        $caught = $false
+        try { Assert-SetuoraServeRoute $config 'lite.tailnet.ts.net' $true 8081 } catch { $caught = $true }
+        Assert-Equal $caught $true 'Missing Lite root must fail status while Master route remains'
+    }
+    'saved-ports' {
+        $script:IsSource = $true
+        $ApplicationRoot = Join-Path ([IO.Path]::GetTempPath()) ('setuora-ports-' + [guid]::NewGuid().ToString('N'))
+        [IO.Directory]::CreateDirectory($ApplicationRoot) | Out-Null
+        try {
+            [IO.File]::WriteAllText((Join-Path $ApplicationRoot '.runtime-ports.json'), '{"web_port":8001,"caddy_port":8081}')
+            $ports = Get-SetuoraSavedPorts
+            Assert-Equal $ports.web_port 8001 'Saved app port is readable through PowerShell JSON'
+            Assert-Equal $ports.caddy_port 8081 'Saved Caddy port is readable through PowerShell JSON'
+        } finally { Remove-Item -LiteralPath $ApplicationRoot -Recurse -Force }
+    }
     'menu' {
         function Invoke-SetuoraCommand([string]$Action) {
             $script:Calls.Add("menu:$Action")
@@ -244,6 +276,10 @@ switch ($Case) {
         $script:Answers.Enqueue('0')
         Assert-Equal (Show-SetuoraMenu) 0 'Menu selections execute and return to menu'
         Assert-Equal $script:Calls @($expected | ForEach-Object { "menu:$_" }) 'Every menu selection dispatches the expected action'
+        Reset-Calls
+        $script:Answers.Enqueue('9')
+        Assert-Equal (Show-SetuoraMenu) 0 'Successful uninstall exits the menu before its folder is removed'
+        Assert-Equal $script:Calls @('menu:uninstall') 'Uninstall menu dispatches removal'
         Reset-Calls
         $script:FailMenu = $true
         $script:Answers.Enqueue('2')

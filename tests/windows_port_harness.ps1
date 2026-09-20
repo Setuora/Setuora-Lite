@@ -26,6 +26,8 @@ function Stop-Process($Id, [switch]$Force, $ErrorAction) { $script:Stopped += $I
 $caught = $false
 try { . $PortClearer -ProjectRoot $projectRoot -Port 8000 } catch { $caught = $true }
 if (-not $caught -or $script:Stopped.Count -ne 0) { throw 'Foreign listener must never be killed' }
+. $PortClearer -ProjectRoot $projectRoot -Port 8000 -AllowForeign
+if ($script:Stopped.Count -ne 0) { throw 'Safe reconfiguration stop must leave a foreign listener alone' }
 
 $script:Owner = 'setuora'
 . $PortClearer -ProjectRoot $projectRoot -Port 8000

@@ -29,7 +29,7 @@ def powershell():
 
 
 @pytest.mark.parametrize(
-    "case", ["parse", "dispatch", "elevation", "routing", "source-update", "tailnet", "menu"]
+    "case", ["parse", "dispatch", "elevation", "routing", "source-update", "tailnet", "serve-route", "saved-ports", "menu"]
 )
 def test_windows_controller_runtime_with_isolated_effects(powershell, case):
     result = subprocess.run(  # noqa: S603
@@ -66,7 +66,7 @@ def test_windows_controller_help_and_invalid_command_exit_codes(powershell):
     assert help_result.returncode == 0, help_result.stdout + help_result.stderr
     assert "Double-click setuora.bat" in help_result.stdout
     assert (
-        "Commands: setup, start, stop, status, open, logs, preflight, update, help"
+        "Commands: setup, start, stop, status, open, logs, preflight, update, uninstall, help"
         in help_result.stdout
     )
     invalid_result = subprocess.run(  # noqa: S603

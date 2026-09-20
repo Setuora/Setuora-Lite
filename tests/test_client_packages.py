@@ -41,6 +41,8 @@ def test_package_builder_creates_windows_only_installer(tmp_path):
     assert f"{root}/scripts/windows/run-server.cmd" in members
     assert f"{root}/scripts/windows/clear-owned-port.ps1" in members
     assert f"{root}/scripts/windows/Caddyfile.lite" in members
+    for recovery_script in ("uninstall.ps1", "finish-uninstall.ps1", "prepare-recovery.py"):
+        assert f"{root}/scripts/windows/{recovery_script}" in members
     assert f"{root}/compose.yaml" not in members
     assert f"{root}/Dockerfile" not in members
     for member in members:

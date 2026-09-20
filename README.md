@@ -25,7 +25,7 @@ The former SFTP debtor/creditor exchange assumed Tally at each franchise. Its im
 
 ## Setup
 
-1. Double-click `install-lite.bat` on a dedicated Windows 10/11 x64 franchise computer and approve the Administrator prompt. It downloads the latest Lite code, installs Git, Python, Caddy, and Tailscale as needed, configures startup tasks, and shows Lite's private HTTPS address. Sign in to the same Tailscale network as Master when prompted.
+1. Double-click `install-lite.bat` on a Windows 10/11 x64 franchise computer and approve the Administrator prompt. It downloads the latest Lite code, installs Git, Python, Caddy, and Tailscale as needed, configures startup tasks, and shows Lite's private HTTPS address. Sign in to the same Tailscale network as Master when prompted. Lite selects unused local ports if its usual ports are occupied, including by Master on the same computer.
 2. Join each staff PC to that tailnet and open Lite's `https://<lite-name>.<tailnet>.ts.net` address. Browser camera scanning requires this HTTPS address.
 3. On Master, open **Franchises** (`/franchises`), save Master's private HTTPS address, and add a unique permanent franchise code. Copy that franchise's connection details securely to Lite.
 4. In Lite, open **Admin → Master connection** (`/master-connection`), paste the copied JSON, and select **Connect to Master**. Verify the inventory baseline reached Master before staff begin work. Tally runs only at Master.

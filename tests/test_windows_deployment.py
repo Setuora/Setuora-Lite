@@ -76,9 +76,9 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     assert "SETUORA_ELEVATED_LOG" not in launcher
     assert "RedirectStandardOutput" not in launcher
     assert "No action was completed" in launcher
-    assert "if ($PauseAfter)" in launcher
+    assert "if ($PauseAfter -and -not $script:Uninstalled)" in launcher
     assert (
-        '$Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "logs"'
+        '$Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "uninstall", "logs"'
         in launcher
     )
     for action in (
@@ -225,27 +225,90 @@ def test_repair_preserves_existing_database_and_host_configuration(tmp_path, mon
     assert deploy._has_application_data()
 
 
-def test_preflight_rejects_wrong_port_and_nonpersistent_database():
+def test_preflight_accepts_alternate_port_and_rejects_invalid_or_duplicate_ports():
     values = _valid_environment()
     values.update({"SETUORA_WEB_PORT": "9000", "DATABASE_URL": "sqlite:///:memory:"})
     issues = deploy._environment_issues(values, has_application_data=False)
-    assert "SETUORA_WEB_PORT must remain 8000 for the Windows service." in issues
+    assert not any("SETUORA_WEB_PORT" in issue for issue in issues)
     assert "DATABASE_URL must point to a persistent SQLite database for backups." in issues
+    values.update({"SETUORA_WEB_PORT": "0", "SETUORA_CADDY_PORT": "0"})
+    issues = deploy._environment_issues(values, has_application_data=False)
+    assert "SETUORA_WEB_PORT must be a port from 1024 to 65535." in issues
+    assert "SETUORA_CADDY_PORT must be a port from 1024 to 65535." in issues
+    values.update({"SETUORA_WEB_PORT": "8001", "SETUORA_CADDY_PORT": "8001"})
+    assert "The Lite application and Caddy must use different ports." in deploy._environment_issues(values, has_application_data=False)
 
 
-def test_stop_waits_until_web_process_releases_port(monkeypatch):
+def test_setup_moves_from_occupied_default_and_preserves_saved_free_port(tmp_path, monkeypatch):
+    monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.setattr(deploy, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(deploy, "RUNTIME_PORTS_PATH", tmp_path / ".runtime-ports.json")
+    monkeypatch.setattr(deploy, "_run", lambda *args, **kwargs: None)
+    deploy._write_env({"SETUORA_WEB_PORT": "8000", "SETUORA_CADDY_PORT": "8080"})
+    monkeypatch.setattr(deploy, "_port_is_free", lambda port: port != 8000)
+    assert deploy._assign_free_port("SETUORA_WEB_PORT", 8000) == 8001
+    assert deploy._read_env()[1]["SETUORA_WEB_PORT"] == "8001"
+    assert deploy._public_web_port() == 8001
+    assert deploy._assign_free_port("SETUORA_WEB_PORT", 8000) == 8001
+    assert deploy._assign_free_port("SETUORA_CADDY_PORT", 8080, exclude={8001}) == 8080
+
+
+def test_lite_reserves_stopped_master_port_for_app_and_caddy(tmp_path, monkeypatch):
+    monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.setattr(deploy, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(deploy, "RUNTIME_PORTS_PATH", tmp_path / ".runtime-ports.json")
+    monkeypatch.setattr(deploy, "_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(deploy, "_port_is_free", lambda port: True)
+    master = tmp_path / "Setuora" / "Setuora-Master"
+    master.mkdir(parents=True)
+    saved = master / "runtime-port.txt"
+    saved.write_text("8000\n", encoding="ascii")
+    deploy._write_env({"SETUORA_WEB_PORT": "8000", "SETUORA_CADDY_PORT": "8080"})
+    assert deploy._assign_free_port("SETUORA_WEB_PORT", 8000) == 8001
+    saved.write_text("8080\n", encoding="ascii")
+    assert deploy._assign_free_port("SETUORA_CADDY_PORT", 8080, exclude={8001}) == 8081
+
+
+def test_master_port_record_falls_back_to_env_and_handles_missing_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("ProgramData", str(tmp_path))
+    assert deploy._master_reserved_ports() == set()
+    master = tmp_path / "Setuora" / "Setuora-Master-windows"
+    master.mkdir(parents=True)
+    (master / "runtime-port.txt").write_text("damaged", encoding="ascii")
+    (master / ".env").write_text("SETUORA_WEB_PORT=8012\n", encoding="utf-8")
+    assert deploy._master_reserved_ports() == {8012}
+    (master / ".env").unlink()
+    assert deploy._master_reserved_ports() == set()
+
+
+def test_server_runner_and_caddy_template_follow_saved_ports(monkeypatch):
+    import argparse
+    import subprocess
+
+    seen = []
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_configured_port", lambda key, default: 8017)
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda command, **kwargs: (seen.append(command) or subprocess.CompletedProcess(command, 0)),
+    )
+    deploy.serve(argparse.Namespace())
+    assert seen[0][seen[0].index("--port") + 1] == "8017"
+    runner = (PROJECT_ROOT / "scripts/windows/run-server.cmd").read_text(encoding="utf-8")
+    assert "deploy.py serve" in runner
+    template = (PROJECT_ROOT / "scripts/windows/Caddyfile.lite").read_text(encoding="utf-8")
+    assert "127.0.0.1:__CADDY_PORT__" in template
+    assert "127.0.0.1:__APP_PORT__" in template
+
+
+def test_stop_uses_owned_process_check_and_leaves_foreign_listener_alone(monkeypatch):
     import argparse
 
     events = []
     monkeypatch.setattr(deploy, "_check_windows", lambda: None)
     monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: events.append("task-end"))
-    attempts = iter([[42], []])
-
-    def listeners():
-        events.append("check-port")
-        return next(attempts)
-
-    monkeypatch.setattr(deploy, "_port_listeners", listeners)
+    monkeypatch.setattr(deploy, "_port_listeners", lambda port: (_ for _ in ()).throw(AssertionError("foreign listener should remain untouched")))
     monkeypatch.setattr(
         deploy,
         "_run",
@@ -253,7 +316,7 @@ def test_stop_waits_until_web_process_releases_port(monkeypatch):
     )
     monkeypatch.setattr(deploy.time, "sleep", lambda _: None)
     deploy.stop(argparse.Namespace())
-    assert events == ["task-end", "check-port", "check-port"]
+    assert events == ["task-end"]
 
 
 def test_no_listener_is_free_even_when_loopback_connections_time_out(monkeypatch):
@@ -262,7 +325,7 @@ def test_no_listener_is_free_even_when_loopback_connections_time_out(monkeypatch
     monkeypatch.setattr(
         deploy, "_run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
     )
-    monkeypatch.setattr(deploy, "_port_listeners", lambda: [])
+    monkeypatch.setattr(deploy, "_port_listeners", lambda port: [])
     deploy._wait_for_stop(timeout_seconds=1)
 
 
@@ -278,14 +341,14 @@ def test_stop_does_not_report_success_when_process_keeps_running(monkeypatch):
         "_run",
         lambda *args, **kwargs: __import__("subprocess").CompletedProcess(args, 0),
     )
-    monkeypatch.setattr(deploy, "_port_listeners", lambda: [42])
+    monkeypatch.setattr(deploy, "_port_listeners", lambda port: [42])
     times = iter([0, 31])
     monkeypatch.setattr(deploy.time, "monotonic", lambda: next(times))
     with pytest.raises(deploy.DeploymentError, match="still in use"):
-        deploy.stop(argparse.Namespace())
+        deploy._wait_for_stop(timeout_seconds=1)
 
 
-def test_foreign_port_owner_blocks_stop_and_update(monkeypatch):
+def test_port_inspection_failure_blocks_stop(monkeypatch):
     import argparse
     import subprocess
 
@@ -311,6 +374,8 @@ def test_port_clearer_requires_exact_server_executable_and_command():
     assert "[StringComparison]::OrdinalIgnoreCase" in script
     assert "app\\.main:app" in script
     assert "--port" in script
+    assert "$AllowForeign" in script
+    assert "$Port(?:\\s|$)" in script
     assert script.index("Test-SetuoraProcess $process") < script.index("Stop-Process -Id $processId")
 
 
@@ -378,7 +443,8 @@ def test_setup_repair_stops_existing_task_before_replacing_runtime(monkeypatch):
     monkeypatch.setattr(
         deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
     )
-    monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
+    monkeypatch.setattr(deploy, "_wait_for_stop", lambda **kwargs: events.append("stop"))
+    monkeypatch.setattr(deploy, "_assign_free_port", lambda *args, **kwargs: 8000)
     monkeypatch.setattr(deploy, "_install_runtime", lambda: events.append("install"))
     monkeypatch.setattr(deploy, "_secure_code_permissions", lambda: None)
     monkeypatch.setattr(deploy, "_ensure_task", lambda: None)

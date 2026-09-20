@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import stat
 import subprocess  # nosec B404
 import sys
@@ -25,6 +26,7 @@ ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.example"
 VENV_PATH = PROJECT_ROOT / ".venv"
 RUNNER_PATH = PROJECT_ROOT / "scripts" / "windows" / "run-server.cmd"
 PORT_CLEARER_PATH = PROJECT_ROOT / "scripts" / "windows" / "clear-owned-port.ps1"
+RUNTIME_PORTS_PATH = PROJECT_ROOT / ".runtime-ports.json"
 TASK_NAME = "Setuora-Lite"
 FIREWALL_RULE_NAME = "Setuora-Lite-LAN"
 UNSAFE_PASSWORDS = {
@@ -155,12 +157,15 @@ def _environment_issues(
     }
     if not {"localhost", "127.0.0.1"}.issubset(trusted_hosts):
         issues.append("TRUSTED_HOSTS must include localhost and 127.0.0.1.")
-    try:
-        port = int(values.get("SETUORA_WEB_PORT", "8000"))
-    except ValueError:
-        port = 0
-    if port != 8000:
-        issues.append("SETUORA_WEB_PORT must remain 8000 for the Windows service.")
+    for key, default in (("SETUORA_WEB_PORT", "8000"), ("SETUORA_CADDY_PORT", "8080")):
+        try:
+            port = int(values.get(key) or default)
+        except ValueError:
+            port = 0
+        if not 1024 <= port <= 65535:
+            issues.append(f"{key} must be a port from 1024 to 65535.")
+    if values.get("SETUORA_WEB_PORT", "8000") == values.get("SETUORA_CADDY_PORT", "8080"):
+        issues.append("The Lite application and Caddy must use different ports.")
     if values.get("AUTOMATIC_BACKUPS_ENABLED", "true").strip().lower() != "true":
         issues.append("AUTOMATIC_BACKUPS_ENABLED must be true for production.")
     try:
@@ -217,6 +222,7 @@ def _prepare_environment() -> None:
             "SESSION_COOKIE_SECURE": "true",
             "TRUSTED_HOSTS": ",".join(sorted(trusted_hosts)),
             "SETUORA_WEB_PORT": values.get("SETUORA_WEB_PORT") or "8000",
+            "SETUORA_CADDY_PORT": values.get("SETUORA_CADDY_PORT") or "8080",
             "MASTER_SYNC_ENABLED": values.get("MASTER_SYNC_ENABLED") or "false",
             "SFTP_SYNC_ENABLED": "false",
         }
@@ -332,12 +338,97 @@ def _wait_for_health(timeout_seconds: int = 120) -> None:
     raise DeploymentError(f"Setuora Lite did not become healthy at {url}. Run `setuora.ps1 logs`.")
 
 
-def _wait_for_stop(timeout_seconds: int = 30) -> None:
+def _configured_port(key: str, default: int) -> int:
+    _, values = _read_env()
+    try:
+        port = int(values.get(key) or default)
+    except ValueError as exc:
+        raise DeploymentError(f"{key} is not a valid port.") from exc
+    if not 1024 <= port <= 65535:
+        raise DeploymentError(f"{key} must be a port from 1024 to 65535.")
+    return port
+
+
+def _write_runtime_ports() -> None:
+    ports = {
+        "web_port": _configured_port("SETUORA_WEB_PORT", 8000),
+        "caddy_port": _configured_port("SETUORA_CADDY_PORT", 8080),
+    }
+    if RUNTIME_PORTS_PATH.exists() and getattr(RUNTIME_PORTS_PATH.lstat(), "st_file_attributes", 0) & WINDOWS_REPARSE_POINT:
+        raise DeploymentError("The runtime ports file is linked; setup will not write through it.")
+    RUNTIME_PORTS_PATH.write_text(json.dumps(ports, sort_keys=True) + "\n", encoding="utf-8")
+    if sys.platform == "win32":
+        _run(["icacls.exe", str(RUNTIME_PORTS_PATH), "/inheritance:r", "/grant:r", "*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:RX", "/Q", "/L"])
+        _run(["icacls.exe", str(RUNTIME_PORTS_PATH), "/remove:g", "*S-1-5-11", "*S-1-1-0", "/Q", "/L"])
+
+
+def _port_is_free(port: int) -> bool:
+    if _port_listeners(port):
+        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _master_reserved_ports() -> set[int]:
+    """Keep Master's saved port free even when its task is stopped."""
+    program_data = os.environ.get("ProgramData")
+    if not program_data:
+        return set()
+    reserved: set[int] = set()
+    for name in ("Setuora-Master", "Setuora-Master-windows"):
+        root = Path(program_data) / "Setuora" / name
+        public_port = root / "runtime-port.txt"
+        if public_port.is_file():
+            try:
+                port = int(public_port.read_text(encoding="ascii").strip())
+            except (OSError, UnicodeError, ValueError):
+                port = 0
+            if 1024 <= port <= 65535:
+                reserved.add(port)
+                continue
+        # Older Master releases may lack the public port file. Setup runs with
+        # Administrator rights and can use the protected environment instead.
+        env_path = root / ".env"
+        if env_path.is_file():
+            try:
+                _, values = _read_env(env_path)
+                port = int(values.get("SETUORA_WEB_PORT") or "8000")
+            except (OSError, UnicodeError, ValueError) as exc:
+                raise DeploymentError(
+                    f"The Master port record in {root} is unreadable. Repair Master before setting up Lite."
+                ) from exc
+            if not 1024 <= port <= 65535:
+                raise DeploymentError(
+                    f"The Master port record in {root} is invalid. Repair Master before setting up Lite."
+                )
+            reserved.add(port)
+    return reserved
+
+
+def _assign_free_port(key: str, default: int, *, exclude: set[int] | None = None) -> int:
+    preferred = _configured_port(key, default)
+    excluded = set(exclude or ()) | _master_reserved_ports()
+    candidates = [preferred, *range(default, 65536)]
+    for port in candidates:
+        if port not in excluded and _port_is_free(port):
+            if port != preferred:
+                _write_env({key: str(port)})
+                print(f"Port {preferred} is in use; Setuora Lite will use {port} for {key}.")
+            _write_runtime_ports()
+            return port
+    raise DeploymentError(f"No free localhost port is available for {key}.")
+
+
+def _wait_for_stop(timeout_seconds: int = 30, *, allow_foreign: bool = False) -> None:
     # Do not replace runtime files while the scheduled process still owns the port.
     # Inspect every interface, including a listener that does not bind loopback.
     # The helper refuses to stop any process it cannot identify as this server.
-    result = _run(
-        [
+    port = _configured_port("SETUORA_WEB_PORT", 8000)
+    command = [
             "powershell.exe",
             "-NoLogo",
             "-NoProfile",
@@ -348,22 +439,28 @@ def _wait_for_stop(timeout_seconds: int = 30) -> None:
             "-ProjectRoot",
             str(PROJECT_ROOT),
             "-Port",
-            "8000",
-        ],
+            str(port),
+        ]
+    if allow_foreign:
+        command.append("-AllowForeign")
+    result = _run(
+        command,
         check=False,
         capture=True,
     )
     if result.returncode != 0:
         raise DeploymentError(
-            (result.stderr or result.stdout or "Could not inspect the owner of port 8000.").strip()
+            (result.stderr or result.stdout or f"Could not inspect the owner of port {port}.").strip()
         )
+    if allow_foreign:
+        return
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if not _port_listeners():
+        if not _port_listeners(port):
             return
         time.sleep(0.5)
     raise DeploymentError(
-        "Port 8000 is still in use after stopping the task. "
+        f"Port {port} is still in use after stopping the task. "
         "Check the running Setuora process before updating files."
     )
 def _secure_code_permissions() -> None:
@@ -403,9 +500,9 @@ def _secure_code_permissions() -> None:
             _run(["icacls.exe", str(child), "/remove:g", "*S-1-5-11", "*S-1-1-0", "/Q", "/L"])
 
 
-def _port_listeners() -> list[int]:
+def _port_listeners(port: int) -> list[int]:
     script = (
-        "$items = @(Get-NetTCPConnection -LocalPort 8000 -State Listen "
+        f"$items = @(Get-NetTCPConnection -LocalPort {port} -State Listen "
         "-ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); "
         "ConvertTo-Json -InputObject $items -Compress"
     )
@@ -416,12 +513,24 @@ def _port_listeners() -> list[int]:
     try:
         listeners = json.loads(result.stdout or "[]")
     except ValueError as exc:
-        raise DeploymentError("Windows could not inspect port 8000 listeners.") from exc
+        raise DeploymentError(f"Windows could not inspect port {port} listeners.") from exc
     if not isinstance(listeners, list) or any(
         not isinstance(pid, int) for pid in listeners
     ):
-        raise DeploymentError("Windows returned invalid port 8000 listener details.")
+        raise DeploymentError(f"Windows returned invalid port {port} listener details.")
     return listeners
+
+
+def _public_web_port() -> int:
+    if not RUNTIME_PORTS_PATH.exists():
+        return 8000  # Existing installations receive the public file at their next repair.
+    try:
+        port = json.loads(RUNTIME_PORTS_PATH.read_text(encoding="utf-8"))["web_port"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise DeploymentError("The saved Lite port is unreadable. Run Setup / repair.") from exc
+    if type(port) is not int or not 1024 <= port <= 65535:
+        raise DeploymentError("The saved Lite port is invalid. Run Setup / repair.")
+    return port
 
 
 def _has_application_data() -> bool:
@@ -457,9 +566,11 @@ def setup(_args: argparse.Namespace) -> None:
     _prepare_environment()
     preflight(_args)
     if _task("/Query", "/TN", TASK_NAME, check=False, capture=True).returncode == 0:
-        stop(_args)
+        _task("/End", "/TN", TASK_NAME, check=False)
+        _wait_for_stop(allow_foreign=True)
     else:
-        _wait_for_stop()
+        _wait_for_stop(allow_foreign=True)
+    _assign_free_port("SETUORA_WEB_PORT", 8000)
     _install_runtime()
     _secure_code_permissions()
     _remove_legacy_lan_firewall()
@@ -480,9 +591,11 @@ def start(_args: argparse.Namespace) -> None:
         raise DeploymentError(
             "The Setuora background task is missing. Choose Setup / repair first."
         )
-    # Restarting an existing task also verifies that port 8000 is available or
-    # clears an orphan from this exact installation before Task Scheduler runs it.
-    stop(_args)
+    # Stop this installation, then choose another port if a different process
+    # has occupied its previous port since the last start.
+    _task("/End", "/TN", TASK_NAME, check=False)
+    _wait_for_stop(allow_foreign=True)
+    _assign_free_port("SETUORA_WEB_PORT", 8000)
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     print("Setuora Lite is running.")
@@ -491,7 +604,7 @@ def start(_args: argparse.Namespace) -> None:
 def stop(_args: argparse.Namespace) -> None:
     _check_windows()
     _task("/End", "/TN", TASK_NAME, check=False)
-    _wait_for_stop()
+    _wait_for_stop(allow_foreign=True)
     print("Setuora Lite stopped. The database and Master event queue were preserved.")
 
 
@@ -500,7 +613,8 @@ def status(_args: argparse.Namespace) -> None:
     task = _task("/Query", "/TN", TASK_NAME, "/FO", "LIST", check=False, capture=True)
     if task.returncode == 0 and task.stdout.strip():
         print(task.stdout.strip())
-    url = "http://127.0.0.1:8000/health"
+    port = _public_web_port()
+    url = f"http://127.0.0.1:{port}/health"
     try:
         with urllib.request.urlopen(url, timeout=3) as response:  # nosec B310
             payload = json.load(response)
@@ -510,7 +624,7 @@ def status(_args: argparse.Namespace) -> None:
             "If Start fails, choose View recent logs."
         ) from exc
     if payload != {"status": "ok", "role": "lite"}:
-        raise DeploymentError("Port 8000 is being used by a different application.")
+        raise DeploymentError(f"Port {port} is being used by a different application.")
     print("Setuora Lite is running and its database is responding.")
     print("Open the private Tailscale HTTPS address shown by the controls menu.")
 
@@ -599,6 +713,26 @@ def backup(_args: argparse.Namespace) -> None:
     print(f"Verified SQLite backup: {result.path}")
 
 
+def configure_caddy_port(_args: argparse.Namespace) -> None:
+    _check_windows()
+    if not ENV_PATH.exists():
+        raise DeploymentError("Run Setup / repair before configuring Caddy.")
+    app_port = _configured_port("SETUORA_WEB_PORT", 8000)
+    port = _assign_free_port("SETUORA_CADDY_PORT", 8080, exclude={app_port})
+    print(f"Caddy will proxy Lite on localhost:{port}.")
+
+
+def serve(_args: argparse.Namespace) -> None:
+    _check_windows()
+    port = _configured_port("SETUORA_WEB_PORT", 8000)
+    result = _run(
+        [str(_venv_python()), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port), "--workers", "1", "--no-access-log"],
+        check=False,
+    )
+    if result.returncode:
+        raise DeploymentError(f"The Lite web server exited with code {result.returncode}.")
+
+
 def logs(args: argparse.Namespace) -> None:
     _check_windows()
     log_path = PROJECT_ROOT / "logs" / "setuora.log"
@@ -616,7 +750,9 @@ def update(_args: argparse.Namespace) -> None:
     if not ENV_PATH.exists():
         raise DeploymentError("Run `setuora.ps1 setup` first.")
     preflight(_args)
-    stop(_args)
+    _task("/End", "/TN", TASK_NAME, check=False)
+    _wait_for_stop(allow_foreign=True)
+    _assign_free_port("SETUORA_WEB_PORT", 8000)
     try:
         _install_runtime()
         _secure_code_permissions()
@@ -646,6 +782,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("master-check", master_check, "verify the configured private Master HTTPS route"),
         ("trust-tailnet-host", trust_tailnet_host, "allow Lite's exact private HTTPS hostname"),
         ("backup", backup, "create and verify an SQLite backup"),
+        ("configure-caddy-port", configure_caddy_port, "choose and save Caddy's free localhost port"),
+        ("serve", serve, "run the configured Lite web server"),
         ("update", update, "update dependencies and restart"),
     ):
         command = subparsers.add_parser(name, help=help_text)
