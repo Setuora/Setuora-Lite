@@ -29,7 +29,9 @@ def test_package_builder_creates_windows_only_installer(tmp_path):
     assert installer.is_file()
     assert not list(tmp_path.glob("*linux*"))
 
-    _, encoded_payload = installer.read_bytes().split(b"\n__SETUORA_PAYLOAD_BELOW__\n", 1)
+    _, encoded_payload = installer.read_bytes().replace(b"\r\n", b"\n").split(
+        b"\n__SETUORA_PAYLOAD_BELOW__\n", 1
+    )
     with zipfile.ZipFile(io.BytesIO(base64.b64decode(encoded_payload))) as archive:
         members = set(archive.namelist())
     root = "Setuora-Lite-windows"
@@ -38,6 +40,7 @@ def test_package_builder_creates_windows_only_installer(tmp_path):
     assert f"{root}/app/services/sftp_tally_sync.py" in members
     assert f"{root}/scripts/windows/run-server.cmd" in members
     assert f"{root}/scripts/windows/clear-owned-port.ps1" in members
+    assert f"{root}/scripts/windows/Caddyfile.lite" in members
     assert f"{root}/compose.yaml" not in members
     assert f"{root}/Dockerfile" not in members
     for member in members:
@@ -71,6 +74,8 @@ def test_installer_validates_payload_before_stopping_existing_service():
     assert header.index("Expand-Archive") < header.index("$launcher stop")
     assert header.index("$launcher preflight") < header.index("$launcher stop")
     assert header.index("$launcher stop") < header.index("Copy-Item")
+    assert header.index("$sourceInstall") < header.index("Copy-Item")
+    assert "different Lite installation already owns the startup task" in header
     assert "Start-Process -FilePath $env:SETUORA_SELF -Verb RunAs -Wait -PassThru" in header
     assert "exit $process.ExitCode" in header
     assert "net session" not in header
@@ -78,7 +83,8 @@ def test_installer_validates_payload_before_stopping_existing_service():
 
 def test_packaged_launcher_can_bootstrap_python_and_reuse_existing_runtime():
     launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
-    assert "Python.Python.3.11" in launcher
+    assert "Python.Python.3.13" in launcher
+    assert "www.python.org/ftp/python" in launcher
     assert "$ApplicationRoot\\.venv\\Scripts\\python.exe" in launcher
     assert '$Action -eq "setup"' in launcher
     assert "Install-SetuoraPython" in launcher
@@ -88,7 +94,7 @@ def test_installer_invalidates_only_application_bytecode_after_update_copy():
     header = (PROJECT_ROOT / "client/windows/self-extract-header.cmd").read_text(encoding="utf-8")
     cleanup = "Get-ChildItem -LiteralPath (Join-Path $target 'app')"
     assert header.index("$launcher stop") < header.index("Copy-Item")
-    assert header.index("Copy-Item") < header.index(cleanup) < header.index("$launcher update")
+    assert header.index("Copy-Item") < header.index(cleanup) < header.rindex("$launcher setup")
     assert "-Directory -Filter '__pycache__' -Recurse -Force" in header
     assert "Remove-Item -LiteralPath $cache.FullName -Recurse -Force" in header
     assert "Remove-Item -LiteralPath $target" not in header

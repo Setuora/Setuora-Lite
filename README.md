@@ -25,27 +25,28 @@ The former SFTP debtor/creditor exchange assumed Tally at each franchise. Its im
 
 ## Setup
 
-1. Install Lite on a Windows server in the franchise's private LAN. The installer creates a startup task and opens the Lite web port only on the Windows Private firewall profile.
-2. Publish Master's `/api/v1` endpoints through a reviewed HTTPS reverse proxy with working DNS and a valid certificate. Keep the Master admin console and central Tally gateway private; the installers do not configure this public HTTPS access.
-3. On Master, open **Franchises** (`/franchises`) and save the public Master HTTPS address once. Add a unique permanent franchise code. Master creates the first credential automatically; select **Copy connection details** and transfer those details securely to the matching Lite.
-4. In Lite, open **Admin → Master connection** (`/master-connection`), paste the copied JSON, and select **Connect to Master**. Lite verifies the connection and franchise identity, initializes its inventory baseline once, and starts synchronization.
-5. Confirm that the baseline reached Master before staff begin work. Review event delivery on Lite and Tally voucher status on Master. Tally is installed only at Master.
+1. Double-click `install-lite.bat` on a dedicated Windows 10/11 x64 franchise computer and approve the Administrator prompt. It downloads the latest Lite code, installs Git, Python, Caddy, and Tailscale as needed, configures startup tasks, and shows Lite's private HTTPS address. Sign in to the same Tailscale network as Master when prompted.
+2. Join each staff PC to that tailnet and open Lite's `https://<lite-name>.<tailnet>.ts.net` address. Browser camera scanning requires this HTTPS address.
+3. On Master, open **Franchises** (`/franchises`), save Master's private HTTPS address, and add a unique permanent franchise code. Copy that franchise's connection details securely to Lite.
+4. In Lite, open **Admin → Master connection** (`/master-connection`), paste the copied JSON, and select **Connect to Master**. Verify the inventory baseline reached Master before staff begin work. Tally runs only at Master.
 
-The Lite server makes outbound HTTPS requests only. Its private web port and the central Tally port should not be forwarded from the franchise network.
+The Lite app and Caddy listen on localhost. Tailscale Serve provides private HTTPS to authorized tailnet PCs; do not forward Lite or Tally ports from the franchise network.
 
 ## Windows installation
 
-Build the self-extracting Windows installer:
+The preferred handoff is the single `install-lite.bat` file. Running it again fetches a fast-forward update, creates a verified SQLite backup, and repairs the runtime without removing `.env`, the database, backups, or connection settings. The source checkout lives in `C:\ProgramData\Setuora\Setuora-Lite`.
+
+For a fixed-version release handoff, build the self-extracting Windows installer:
 
 ```powershell
 py -3.11 scripts\build_client_packages.py --version 1.0.0
 ```
 
-Run `dist\Setuora-Lite-1.0.0-windows.cmd` as Administrator on the franchise server. Production files are installed under `C:\ProgramData\Setuora\Setuora-Lite-windows`. A newer installer preserves `.env`, the local database, backups, and connection settings.
+Run `dist\Setuora-Lite-1.0.0-windows.cmd` as Administrator. It installs under `C:\ProgramData\Setuora\Setuora-Lite-windows` and preserves local data on update. Do not mix the Git and fixed-version installations on one computer.
 
 Double-click `setuora.bat` in either a source checkout or an installed copy to open the same controls menu. Closing it leaves Setuora running. Setup, start, stop, update, and configuration checks (`preflight`) request Windows Administrator approval and show an interactive console for prompts and errors.
 
-The installed update action asks you to choose the downloaded Lite Windows `.cmd` installer. A source checkout updates through Git and requires a clean worktree and a fast-forward update. The native Windows controls require acceptance testing on the actual deployment machines.
+The installed update action asks for a downloaded Lite Windows `.cmd` installer. The Git installation updates through Git and requires a clean worktree and a fast-forward update. Native Windows controls still need acceptance testing on the actual deployment machines.
 
 ## Development
 

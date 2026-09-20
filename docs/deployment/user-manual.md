@@ -1,6 +1,6 @@
 # Lite user manual
 
-Staff use Lite on the franchise private LAN to record stock movements, sales, receipts, and transfers. Tally runs at Master, not on the Lite server.
+Staff join the franchise tailnet and use Lite's private HTTPS address to record stock movements, sales, receipts, and transfers. Tally runs at Master, not on the Lite server.
 
 Administrators configure **Admin → Master connection** with the permanent franchise code, Master's HTTPS origin, and this franchise's node credential. After enrollment, initialize inventory once and run the first sync. The connection page shows pending, sent, and failed events without showing credentials or event contents.
 

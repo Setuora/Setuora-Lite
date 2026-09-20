@@ -10,7 +10,8 @@ def test_active_deployment_is_windows_native_with_tailscale_setup():
     assert not (PROJECT_ROOT / "Dockerfile").exists()
     deployment = (PROJECT_ROOT / "deploy.py").read_text(encoding="utf-8").lower()
     assert "schtasks.exe" in deployment
-    assert "new-netfirewallrule" in deployment
+    assert "remove-netfirewallrule" in deployment
+    assert "new-netfirewallrule" not in deployment
     assert "docker" not in deployment
     controller = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
     assert "Initialize-SetuoraTailnet" in controller
@@ -36,7 +37,7 @@ def test_windows_preflight_accepts_native_configuration():
             "APP_SECRET_KEY": "x" * 48,
             "BOOTSTRAP_ADMIN_PASSWORD": "strong-admin-password",
             "SETUORA_APP_MODE": "lite",
-            "SESSION_COOKIE_SECURE": "false",
+            "SESSION_COOKIE_SECURE": "true",
             "TRUSTED_HOSTS": "127.0.0.1,localhost,franchise-server",
             "SETUORA_WEB_PORT": "8000",
             "AUTOMATIC_BACKUPS_ENABLED": "true",
@@ -51,6 +52,7 @@ def test_environment_writer_preserves_secret_characters(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     env_path.write_text("# keep\n", encoding="utf-8")
     monkeypatch.setattr(deploy, "ENV_PATH", env_path)
+    monkeypatch.setattr(deploy, "_run", lambda *args, **kwargs: None)
     password = 'spaces # quote " slash \\ stay intact'
     deploy._write_env({"SFTP_PASSWORD": password})
     assert deploy._read_env()[1]["SFTP_PASSWORD"] == password
@@ -76,7 +78,7 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     assert "No action was completed" in launcher
     assert "if ($PauseAfter)" in launcher
     assert (
-        '$Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime"'
+        '$Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "logs"'
         in launcher
     )
     for action in (
@@ -125,7 +127,7 @@ def _valid_environment():
         "APP_SECRET_KEY": "x" * 48,
         "BOOTSTRAP_ADMIN_PASSWORD": "unique-admin-password",
         "SETUORA_APP_MODE": "lite",
-        "SESSION_COOKIE_SECURE": "false",
+        "SESSION_COOKIE_SECURE": "true",
         "TRUSTED_HOSTS": "127.0.0.1,localhost",
         "SETUORA_WEB_PORT": "8000",
         "AUTOMATIC_BACKUPS_ENABLED": "true",
@@ -193,6 +195,7 @@ def test_invalid_setup_and_update_fail_before_install_or_stop(tmp_path, monkeypa
 def test_repair_preserves_existing_database_and_host_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(deploy, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(deploy, "_run", lambda *args, **kwargs: None)
     monkeypatch.setenv("COMPUTERNAME", "warehouse-pc")
     values = _valid_environment()
     values.update(
@@ -377,11 +380,11 @@ def test_setup_repair_stops_existing_task_before_replacing_runtime(monkeypatch):
     )
     monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
     monkeypatch.setattr(deploy, "_install_runtime", lambda: events.append("install"))
+    monkeypatch.setattr(deploy, "_secure_code_permissions", lambda: None)
     monkeypatch.setattr(deploy, "_ensure_task", lambda: None)
     monkeypatch.setattr(deploy, "_wait_for_health", lambda: events.append("healthy"))
     monkeypatch.setattr(deploy, "_write_env", lambda _: None)
-    if hasattr(deploy, "_configure_private_firewall"):
-        monkeypatch.setattr(deploy, "_configure_private_firewall", lambda: None)
+    monkeypatch.setattr(deploy, "_remove_legacy_lan_firewall", lambda: None)
     deploy.setup(argparse.Namespace())
     assert events == ["stop", "install", "healthy"]
 
@@ -458,8 +461,10 @@ for startup in range(2):
     if startup:
         # A repaired/restarted installation no longer retains its bootstrap password.
         os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = ""
+        os.environ["SESSION_COOKIE_SECURE"] = "true"
         get_settings.cache_clear()
-    with TestClient(app) as client:
+    scheme = "https" if startup else "http"
+    with TestClient(app, base_url=f"{scheme}://testserver") as client:
         health = client.get("/health")
         assert health.status_code == 200, health.text
         assert health.json() == {"status": "ok", "role": os.environ["SETUORA_APP_MODE"]}
@@ -471,11 +476,13 @@ for startup in range(2):
                 "username": "warehouse-admin",
                 "password": os.environ["SMOKE_BOOTSTRAP_PASSWORD"],
             },
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": f"{scheme}://testserver"},
             follow_redirects=False,
         )
         assert login.status_code == 303, login.text
         assert "httponly" in login.headers["set-cookie"].lower()
+        if startup:
+            assert "secure" in login.headers["set-cookie"].lower()
         home = client.get("/")
         assert home.status_code == 200, home.text
         backup = create_scheduled_backup()

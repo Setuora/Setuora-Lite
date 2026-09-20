@@ -1,44 +1,13 @@
-# Setuora Lite Windows Package
+# Setuora Lite Windows package
 
-The `.cmd` file is a self-extracting Windows installer and updater for the
-franchise server. Run it as Administrator. It installs under
-`C:\ProgramData\Setuora\Setuora-Lite-windows`.
+The preferred client handoff is the single `install-lite.bat` file. It downloads the latest Git version and installs under `C:\ProgramData\Setuora\Setuora-Lite`. This self-extracting `.cmd` package is a separate fixed-version release path under `C:\ProgramData\Setuora\Setuora-Lite-windows`. Do not use both on the same computer.
 
-Setup installs Python 3.11 with WinGet when necessary, creates an isolated
-virtual environment, registers a Windows startup task, opens the application
-port on the Private firewall profile, starts Lite, and verifies health. Docker,
-WSL, and a private-network client are not installed.
+Run the `.cmd` package as Administrator on a dedicated x64 Windows 10/11 computer. Setup installs Python, the hash-locked app runtime, Caddy, and Tailscale as needed. It creates Lite and Caddy startup tasks, a local SQLite database, automatic local backups, and a private Tailscale Serve HTTPS route. It removes the old Lite LAN firewall rule. Follow the Tailscale sign-in link and any tailnet device approval step. The application and Caddy listen only on localhost.
 
-On Master, open **Franchises**, save its public HTTPS address once, and add
-this franchise with its permanent code and Tally godown. Master automatically
-creates the first credential. Select **Copy connection details** and transfer
-the copied JSON securely to this Lite administrator.
+Join each staff PC to the same tailnet and use the `https://<lite-name>.<tailnet>.ts.net` address printed by setup. This is the address for browser camera scanning. Secure cookies prevent using the internal HTTP health-check URL as a staff login.
 
-On Lite, open **Admin → Master connection** (`/master-connection`), paste the
-details, and select **Connect to Master**. Lite verifies the connection,
-initializes inventory once, and starts synchronization. Confirm the baseline
-is accepted on Master before staff begin work. Tally runs only at Master.
-Master's public DNS, certificate, and HTTPS reverse proxy must already work;
-the installers and connection form do not configure them.
+On Master, create the franchise and copy its connection details. In Lite, open **Admin → Master connection**, paste those details, and select **Connect to Master**. Check that the initial inventory baseline reached Master. Tally runs only at Master.
 
-Double-click
-`C:\ProgramData\Setuora\Setuora-Lite-windows\setuora.bat` for the controls
-menu: browser, start/stop, status, setup/repair, update, logs, and configuration
-checks. Closing the menu leaves Lite running. Actions requiring Administrator
-access open a visible console after Windows approval.
-
-PowerShell commands are also available:
-
-```powershell
-$setuora = "C:\ProgramData\Setuora\Setuora-Lite-windows\setuora.ps1"
-& $setuora status
-& $setuora logs --follow
-& $setuora stop
-& $setuora start
-```
-
-Choose **Install downloaded update** and select a newer Lite `.cmd`
-installer, or run that installer directly. The installer preserves `.env`,
-the database, backups, and Master connection state.
+Double-click `setuora.bat` in the installed folder for browser access, setup/repair, start/stop, status, logs, and updates. A newer `.cmd` package preserves `.env`, the SQLite database, backups, and connection settings. Automatic backups remain on this computer until an off-machine destination is configured in the app.
 
 See the [installation guide](docs/deployment/installation-guide.md).

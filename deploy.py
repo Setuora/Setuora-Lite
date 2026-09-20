@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import subprocess  # nosec B404
 import sys
 import tempfile
@@ -39,6 +40,7 @@ PLACEHOLDER_SECRETS = {
     "replace-with-a-long-random-secret",
 }
 PLAIN_ENV_VALUE = re.compile(r"^[A-Za-z0-9_./,:*?=@+%-]+$")
+WINDOWS_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
 
 
 class DeploymentError(RuntimeError):
@@ -89,6 +91,8 @@ def _format_env_value(value: str) -> str:
 
 
 def _write_env(updates: dict[str, str]) -> None:
+    if ENV_PATH.exists() and getattr(ENV_PATH.lstat(), "st_file_attributes", 0) & WINDOWS_REPARSE_POINT:
+        raise DeploymentError(".env is a linked file; setup will not write through it.")
     lines, _ = _read_env()
     pending = dict(updates)
     output: list[str] = []
@@ -113,9 +117,10 @@ def _write_env(updates: dict[str, str]) -> None:
                 "/inheritance:r",
                 "/grant:r",
                 "*S-1-5-18:F",
-                "*S-1-5-32-544:F",
+                "*S-1-5-32-544:F", "/L",
             ]
         )
+        _run(["icacls.exe", str(ENV_PATH), "/remove:g", "*S-1-5-32-545", "*S-1-5-11", "*S-1-1-0", "/Q", "/L"])
 
 
 def _check_windows() -> None:
@@ -143,8 +148,8 @@ def _environment_issues(
         issues.append("BOOTSTRAP_ADMIN_PASSWORD must be unique and at least 12 characters.")
     if values.get("SETUORA_APP_MODE", "lite").strip().lower() != "lite":
         issues.append("SETUORA_APP_MODE must be lite.")
-    if values.get("SESSION_COOKIE_SECURE", "false").strip().lower() != "false":
-        issues.append("SESSION_COOKIE_SECURE must be false for the Windows HTTP pilot.")
+    if values.get("SESSION_COOKIE_SECURE", "true").strip().lower() != "true":
+        issues.append("SESSION_COOKIE_SECURE must be true for private HTTPS.")
     trusted_hosts = {
         item.strip().lower() for item in values.get("TRUSTED_HOSTS", "").split(",") if item.strip()
     }
@@ -209,7 +214,7 @@ def _prepare_environment() -> None:
         {
             "SETUORA_APP_MODE": "lite",
             "DATABASE_URL": values.get("DATABASE_URL") or "sqlite:///./data/setuora.db",
-            "SESSION_COOKIE_SECURE": "false",
+            "SESSION_COOKIE_SECURE": "true",
             "TRUSTED_HOSTS": ",".join(sorted(trusted_hosts)),
             "SETUORA_WEB_PORT": values.get("SETUORA_WEB_PORT") or "8000",
             "MASTER_SYNC_ENABLED": values.get("MASTER_SYNC_ENABLED") or "false",
@@ -219,6 +224,17 @@ def _prepare_environment() -> None:
     _write_env(updates)
     (PROJECT_ROOT / "data").mkdir(parents=True, exist_ok=True)
     (PROJECT_ROOT / "logs").mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        for protected in (PROJECT_ROOT / "data", PROJECT_ROOT / "logs"):
+            if getattr(protected.lstat(), "st_file_attributes", 0) & WINDOWS_REPARSE_POINT:
+                raise DeploymentError(f"{protected.name} is a linked folder; setup will not change its permissions.")
+            _run(
+                [
+                    "icacls.exe", str(protected), "/inheritance:r", "/grant:r",
+                    "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q", "/L",
+                ]
+            )
+            _run(["icacls.exe", str(protected), "/remove:g", "*S-1-5-32-545", "*S-1-5-11", "*S-1-1-0", "/T", "/Q", "/L"])
 
 
 def _venv_python() -> Path:
@@ -281,16 +297,12 @@ def _ensure_task() -> None:
         _task("/Create", "/TN", TASK_NAME, "/XML", str(task_path), "/F")
 
 
-def _configure_private_firewall() -> None:
-    _, values = _read_env()
-    port = values.get("SETUORA_WEB_PORT", "8000")
+def _remove_legacy_lan_firewall() -> None:
     script = (
         "$ErrorActionPreference='Stop'; "
         f"$existing=Get-NetFirewallRule -Name '{FIREWALL_RULE_NAME}' "
         "-ErrorAction SilentlyContinue; if ($existing) { Remove-NetFirewallRule "
-        f"-Name '{FIREWALL_RULE_NAME}' }}; New-NetFirewallRule -Name "
-        f"'{FIREWALL_RULE_NAME}' -DisplayName 'Setuora Lite LAN' -Direction "
-        f"Inbound -Action Allow -Protocol TCP -LocalPort {port} -Profile Private"
+        f"-Name '{FIREWALL_RULE_NAME}' }}"
     )
     _run(
         [
@@ -354,6 +366,41 @@ def _wait_for_stop(timeout_seconds: int = 30) -> None:
         "Port 8000 is still in use after stopping the task. "
         "Check the running Setuora process before updating files."
     )
+def _secure_code_permissions() -> None:
+    if sys.platform != "win32":
+        return
+    # ProgramData normally allows Users to create files in child directories.
+    # Task Scheduler executes this code as SYSTEM, so installed code must be
+    # writable only by SYSTEM and Administrators. Secrets have separate ACLs.
+    if getattr(PROJECT_ROOT.lstat(), "st_file_attributes", 0) & WINDOWS_REPARSE_POINT:
+        raise DeploymentError("The installation folder is linked; setup will not change its permissions.")
+    _run(
+        [
+            "icacls.exe", str(PROJECT_ROOT), "/inheritance:r", "/grant:r",
+            "*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:RX", "/L",
+        ]
+    )
+    _run(["icacls.exe", str(PROJECT_ROOT), "/remove:g", "*S-1-5-11", "*S-1-1-0", "/Q", "/L"])
+    for child in PROJECT_ROOT.iterdir():
+        if child.name in {".env", "data", "logs"}:
+            continue
+        if getattr(child.lstat(), "st_file_attributes", 0) & WINDOWS_REPARSE_POINT:
+            raise DeploymentError(f"Installed code contains a linked path: {child.name}")
+        grants = (
+            ["*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-32-545:(OI)(CI)RX"]
+            if child.is_dir()
+            else ["*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:RX"]
+        )
+        command = ["icacls.exe", str(child), "/inheritance:r", "/grant:r", *grants]
+        if child.is_dir():
+            command.append("/T")
+        command.append("/Q")
+        command.append("/L")
+        _run(command)
+        if child.is_dir():
+            _run(["icacls.exe", str(child), "/remove:g", "*S-1-5-11", "*S-1-1-0", "/T", "/Q", "/L"])
+        else:
+            _run(["icacls.exe", str(child), "/remove:g", "*S-1-5-11", "*S-1-1-0", "/Q", "/L"])
 
 
 def _port_listeners() -> list[int]:
@@ -414,14 +461,14 @@ def setup(_args: argparse.Namespace) -> None:
     else:
         _wait_for_stop()
     _install_runtime()
-    _configure_private_firewall()
+    _secure_code_permissions()
+    _remove_legacy_lan_firewall()
     _ensure_task()
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     _write_env({"BOOTSTRAP_ADMIN_PASSWORD": ""})
-    host = os.getenv("COMPUTERNAME", "this-server")
     print("Setuora Lite is healthy on Windows.")
-    print(f"Open http://{host}:8000 from the franchise private LAN.")
+    print("Lite listens on localhost. Tailscale Serve will provide its private HTTPS address.")
     print("Configure the Master HTTPS connection from Admin -> Master connection.")
 
 
@@ -465,7 +512,7 @@ def status(_args: argparse.Namespace) -> None:
     if payload != {"status": "ok", "role": "lite"}:
         raise DeploymentError("Port 8000 is being used by a different application.")
     print("Setuora Lite is running and its database is responding.")
-    print("Open http://127.0.0.1:8000 in your browser.")
+    print("Open the private Tailscale HTTPS address shown by the controls menu.")
 
 
 def master_check(_args: argparse.Namespace) -> None:
@@ -522,6 +569,36 @@ def master_check(_args: argparse.Namespace) -> None:
     )
 
 
+def trust_tailnet_host(args: argparse.Namespace) -> None:
+    """Allow this Lite machine's exact Tailscale HTTPS hostname."""
+    _check_windows()
+    host = args.host.strip().rstrip(".").lower()
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.ts\.net", host):
+        raise DeploymentError("Tailscale returned an invalid .ts.net hostname.")
+    if not ENV_PATH.exists():
+        raise DeploymentError(".env is missing. Run Setup / repair first.")
+    _, values = _read_env()
+    hosts = {item.strip().lower() for item in values.get("TRUSTED_HOSTS", "").split(",") if item.strip()}
+    if host not in hosts:
+        hosts.add(host)
+        _write_env({"TRUSTED_HOSTS": ",".join(sorted(hosts))})
+        print(f"Allowed private HTTPS hostname: {host}")
+    else:
+        print(f"Private HTTPS hostname is already allowed: {host}")
+
+
+def backup(_args: argparse.Namespace) -> None:
+    _check_windows()
+    if not _has_application_data():
+        print("No Lite database exists yet; no pre-update backup is needed.")
+        return
+    preflight(_args)
+    from app.services.backup import create_scheduled_backup
+
+    result = create_scheduled_backup()
+    print(f"Verified SQLite backup: {result.path}")
+
+
 def logs(args: argparse.Namespace) -> None:
     _check_windows()
     log_path = PROJECT_ROOT / "logs" / "setuora.log"
@@ -542,7 +619,8 @@ def update(_args: argparse.Namespace) -> None:
     stop(_args)
     try:
         _install_runtime()
-        _configure_private_firewall()
+        _secure_code_permissions()
+        _remove_legacy_lan_firewall()
         _ensure_task()
     except (DeploymentError, subprocess.CalledProcessError, OSError):
         # A failed dependency or task refresh should not leave the previous app
@@ -566,11 +644,14 @@ def build_parser() -> argparse.ArgumentParser:
         ("stop", stop, "stop Setuora Lite while preserving data"),
         ("status", status, "show the Windows scheduled task state"),
         ("master-check", master_check, "verify the configured private Master HTTPS route"),
+        ("trust-tailnet-host", trust_tailnet_host, "allow Lite's exact private HTTPS hostname"),
+        ("backup", backup, "create and verify an SQLite backup"),
         ("update", update, "update dependencies and restart"),
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.set_defaults(function=function)
     logs_parser = subparsers.add_parser("logs", help="show the Windows server log")
+    subparsers.choices["trust-tailnet-host"].add_argument("--host", required=True)
     logs_parser.add_argument("--tail", type=int, default=200)
     logs_parser.add_argument("--follow", action="store_true")
     logs_parser.set_defaults(function=logs)

@@ -17,7 +17,7 @@ $originalTailnetCheck = (Get-Command Test-SetuoraTailnetReady).ScriptBlock
 $ApplicationRoot = [IO.Path]::GetTempPath()
 $ControllerPath = "C:\Warehouse & Team\O'Neil\setuora.ps1"
 $ProductName = 'Setuora test'
-$BrowserUrl = 'http://127.0.0.1:8000'
+$BrowserUrl = 'https://lite.tailnet.ts.net'
 $Command = 'menu'
 $Elevated = $false
 $script:Calls = New-Object System.Collections.Generic.List[string]
@@ -43,7 +43,9 @@ function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @
     return $script:DeployExit
 }
 function Initialize-SetuoraTailnet { $script:Calls.Add('tailnet:setup') }
-function Test-SetuoraTailnetReady { $script:Calls.Add('tailnet:check') }
+function Initialize-SetuoraPrivateWeb { $script:Calls.Add('private:setup') }
+function Test-SetuoraTailnetReady([switch]$SkipMasterCheck) { $script:Calls.Add('tailnet:check') }
+function Get-SetuoraPrivateUrl { return $BrowserUrl }
 function Invoke-SetuoraElevated([string]$Action, [string[]]$ExtraArguments = @()) {
     $script:Calls.Add("elevate:$Action")
     return 17
@@ -66,12 +68,12 @@ function Read-Host([string]$Prompt) {
 switch ($Case) {
     'parse' { if ($definitions.Count -lt 10) { throw 'Expected all shared-controller function definitions' } }
     'dispatch' {
-        foreach ($action in @('setup', 'start', 'stop', 'preflight', 'update', 'update-runtime')) {
+        foreach ($action in @('setup', 'start', 'stop', 'preflight', 'update', 'update-runtime', 'logs')) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 17 "$action forwards elevation exit code"
             Assert-Equal $script:Calls @("elevate:$action") "$action requests elevation without deploying locally"
         }
-        foreach ($action in @('status', 'logs')) {
+        foreach ($action in @('status')) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 0 "$action succeeds without elevation"
             $expected = if ($action -eq 'status') { @('deploy:status', 'tailnet:check') } else { @("deploy:$action") }
@@ -82,7 +84,7 @@ switch ($Case) {
         Assert-Equal $script:Calls @() 'Help does not invoke deployment'
         Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'open') 0 'Open succeeds on healthy service'
-        Assert-Equal $script:Calls @('deploy:status', "process:$BrowserUrl") 'Open checks health first'
+        Assert-Equal $script:Calls @('deploy:status', 'tailnet:check', "process:$BrowserUrl") 'Open checks private HTTPS first'
         $script:DeployExit = 9
         Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'open') 9 'Open forwards failed health status'
@@ -108,8 +110,8 @@ switch ($Case) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 0 'An administrator deploys directly'
             $expected = switch ($action) {
-                'setup' { @('deploy:setup', 'tailnet:setup', 'tailnet:check') }
-                'start' { @('deploy:start', 'tailnet:check') }
+                'setup' { @('deploy:setup', 'tailnet:setup', 'private:setup', 'tailnet:check') }
+                'start' { @('deploy:start', 'private:setup', 'tailnet:check') }
                 default { @("deploy:$action") }
             }
             Assert-Equal $script:Calls $expected 'No nested elevation'
@@ -123,7 +125,7 @@ switch ($Case) {
         Assert-Equal $script:Calls @('source-update') 'Source update does not use package picker'
         Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'update-runtime') 0 'Installer internal update succeeds'
-        Assert-Equal $script:Calls @('deploy:update', 'tailnet:check') 'Internal update cannot open a second installer'
+        Assert-Equal $script:Calls @('deploy:update', 'private:setup', 'tailnet:check') 'Internal update cannot open a second installer'
     }
     'source-update' {
         Set-Item Function:Update-SetuoraSource -Value $originalUpdate
@@ -136,7 +138,7 @@ switch ($Case) {
             return ''
         }
         Assert-Equal (Update-SetuoraSource) 0 'Clean source update succeeds'
-        Assert-Equal $script:Calls @('deploy:preflight', 'git:rev-parse', 'git:status', 'git:branch', 'git:fetch', 'git:rev-parse', 'git:merge-base', 'deploy:stop', 'git:merge', 'deploy:update', 'tailnet:check') 'Source update order'
+        Assert-Equal $script:Calls @('deploy:preflight', 'git:rev-parse', 'git:status', 'deploy:backup', 'git:branch', 'git:fetch', 'git:rev-parse', 'git:merge-base', 'deploy:stop', 'git:merge', 'deploy:update', 'private:setup', 'tailnet:check') 'Source update order'
         $script:DirtySource = $true
         Reset-Calls
         $caught = $false
@@ -185,6 +187,9 @@ switch ($Case) {
                 Self = [pscustomobject]@{ Online = $true; DNSName = 'lite.tailnet.ts.net.' }
             }
         }
+        function Get-SetuoraServeConfig([string]$Tailscale) { $script:Calls.Add('tailscale:serve-status'); return [pscustomobject]@{} }
+        function Assert-SetuoraServeRoute([object]$Config, [string]$TailnetName, [bool]$MustExist) { $script:Calls.Add('tailscale:serve-check') }
+        function Invoke-RestMethod([string]$Uri, [int]$TimeoutSec) { $script:Calls.Add('https:health'); return [pscustomobject]@{ status='ok'; role='lite' } }
         $script:NativeFail = $false
         $script:TailnetState = 'Running'
         Initialize-SetuoraTailnet
@@ -210,7 +215,10 @@ switch ($Case) {
         Reset-Calls
         $script:TailnetState = 'Running'
         Test-SetuoraTailnetReady
-        Assert-Equal $script:Calls @('tailscale:status', 'deploy:master-check') 'Online tailnet checks the saved Master HTTPS route'
+        Assert-Equal $script:Calls @('tailscale:status', 'tailscale:serve-status', 'tailscale:serve-check', 'https:health', 'deploy:master-check') 'Online tailnet checks private HTTPS and Master route'
+        Reset-Calls
+        Test-SetuoraTailnetReady -SkipMasterCheck
+        Assert-Equal $script:Calls @('tailscale:status', 'https:health') 'Read-only status checks HTTPS without reading protected settings'
     }
     'menu' {
         function Invoke-SetuoraCommand([string]$Action) {

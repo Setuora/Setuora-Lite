@@ -1,43 +1,23 @@
-# Lite Windows installation
+# Lite installation on Windows 10/11
 
-1. Prepare a Windows Server 2019+ or current Windows 10/11 Pro server in the franchise private LAN. Tally is not installed or configured here.
-2. Obtain and run the `Setuora-Lite-<version>-windows.cmd` installer as Administrator. It creates a startup task and a Private-profile firewall rule for the Lite web application. Setup also installs the signed Tailscale client if needed, starts its Windows service, and connects it in unattended mode. Open the Tailscale sign-in link shown during setup and sign in to the **same tailnet as Master**. If your tailnet requires device approval, approve this Lite computer in the Tailscale admin console, then run **Setup / repair** again.
-3. On Master, open **Franchises** (`/franchises`) and save the private HTTPS `https://<master-name>.<tailnet>.ts.net` address once. Add this franchise's permanent code and Tally godown. Master creates the first credential automatically. Select **Copy connection details** and transfer the copied JSON securely to this Lite administrator. Each independent Lite needs a different code and credential.
-4. From Lite's **Admin → Master connection** (`/master-connection`), paste those setup details and select **Connect to Master**. Lite checks the server, credential, and franchise identity before saving the connection.
-5. The same action initializes inventory once and starts synchronization. Confirm the local baseline is accepted on Master before staff begin stock work. If the connection needs a replacement credential later, reconnect this same installation with Master's replacement details; do not reset its database or initialize a second franchise.
-6. Test a supported operation and verify both its delivery on Lite and any resulting Tally voucher status on Master.
+Give the client **one file: `install-lite.bat`**. They double-click it on the dedicated franchise computer, approve the Windows Administrator prompt, choose a strong first administrator password, and follow the Tailscale sign-in link. If the tailnet requires device approval, its administrator approves this computer and the client runs the BAT again. Keep the window open until it shows the private HTTPS address. Internet access is needed for GitHub, Python dependencies, Caddy, and Tailscale downloads.
 
-Install one Lite server for each independent warehouse/franchise. Staff PCs open
-that server in a browser with separate user accounts; they do not need separate
-Lite databases. Set a stable LAN address and include the hostname/IP used by
-staff in `TRUSTED_HOSTS`. Test access from a staff PC. The packaged firewall rule
-uses the Private profile; domain-managed networks need an appropriate scoped
-Domain rule from their administrator. Master and Lite both use port 8000, so
-their packaged services require separate machines/VMs.
+The BAT installs Git and Python when missing, clones the current `main` branch into `C:\ProgramData\Setuora\Setuora-Lite`, installs hash-locked Python packages, creates a persistent local SQLite database, configures automatic local backups, and registers startup tasks for Lite and Caddy. It signs Tailscale in with unattended mode and configures Tailscale Serve on private HTTPS port 443. Lite and Caddy listen only on localhost; no LAN firewall rule or router port forwarding is required. Do not install Lite and Master on the same computer because both use port 8000 internally.
 
-Upgrade Master before Lite: the updated Lite includes sales discounts in its
-events, which older Master builds reject. Pausing delivery retains new events;
-initialize the permanent franchise identity before recording stock changes.
+Join every staff PC to the same tailnet and open the `https://<lite-name>.<tailnet>.ts.net` address shown by setup. Use that address for camera scanning. Staff still sign in with separate Lite user accounts. The Tailscale administrator controls which tailnet users can reach Lite. Lite's internal `http://127.0.0.1:8000` URL is for health checks and does not provide a staff browser login with secure cookies.
 
-Before live use, verify reboot without login, real scanners/label printers,
-concurrent scanning, offline work followed by restart/reconnection, partial
-transfers, and backup restoration on the actual Windows PCs. Check vouchers in
-the central Tally test company. Run `setuora.ps1 preflight`, `status`, and `logs`
-from an Administrator PowerShell terminal in the installed folder. Installers
-need dependency downloads and do not provide complete automatic upgrade rollback.
+On Master, open **Franchises**, save Master's private HTTPS address, create the franchise's permanent code and Tally godown, and select **Copy connection details**. In Lite, open **Admin → Master connection**, paste those details, and select **Connect to Master**. Confirm the initial inventory baseline reached Master before staff record new stock activity. Tally runs only at Master. Each Lite installation needs its own code and credential.
 
-## Windows controls and updates
+## Updates and recovery
 
-Double-click `setuora.bat` in the source checkout or installed folder to open the same controls menu. It provides browser access, start/stop, status, setup/repair, updates, logs, and configuration checks. Closing the menu leaves Setuora running.
+Double-click the same `install-lite.bat` again to fetch a fast-forward Git update and run Setup / repair. An update first creates and verifies an SQLite backup. Local `.env`, the database, backups, and Master connection settings are preserved. The update stops if the checkout has local changes or a different Git origin. Do not edit installed source files; use application settings and the controls menu. The BAT refuses to overwrite a separate packaged Lite installation. A source or database schema update cannot be rolled back automatically; retain the pre-update backup and previous source commit for recovery.
 
-Setup, Start, Status, and Update check that Tailscale is online. Once a Master address is saved, they also test its private HTTPS node API without sending the node credential. If that check fails during a network outage, Lite stays available locally and its event queue waits for reconnection. The controls report the connection problem and **Setup / repair** can resume an incomplete Tailscale sign-in.
+The controls menu is `C:\ProgramData\Setuora\Setuora-Lite\setuora.bat`. It opens the HTTPS address, checks status, starts or stops Lite, shows logs, and repairs setup. Status verifies the app, Caddy, the Serve route, and the tailnet HTTPS health endpoint. A restart of the Windows computer should bring both startup tasks and unattended Tailscale back without a user login.
 
-Setup, start, stop, update, and `preflight` request Administrator approval through Windows UAC. Password prompts and errors appear in a visible Administrator console. Cancelling the approval leaves that action incomplete.
+Automatic backups are stored under `data\backups` on this computer. They protect against a damaged database, but a lost or failed computer can also lose those backups. Configure an off-machine backup destination later in Lite's backup settings when one is available. Do not delete the data folder during repair or update.
 
-In an installed copy, choose **Install downloaded update** and select the downloaded `Setuora-Lite-<version>-windows.cmd` installer. In a source checkout, **Update from Git** requires a clean worktree and allows only a fast-forward update from its origin branch; it does not discard local changes. Back up the database and configuration first.
+Before live use, test a reboot without login, a staff PC browser login, camera scanning, printers, offline work followed by reconnection, concurrent scanning, and a backup restoration on the actual Windows machines. Verify Tally vouchers in a test company. Native Windows startup and Tailscale sign-in behavior cannot be fully validated by the application unit tests.
 
-Native BAT/PowerShell, UAC, startup-task, and firewall behavior still need verification on the actual Windows machines; application tests alone do not validate these operating-system functions.
+Windows 10 production machines need active Extended Security Updates or a supported LTSC lifecycle; ordinary Windows 10 support ended on 14 October 2025. Windows 11 should be kept on a supported release. The installer needs x64 hardware for the current Python runtime.
 
-The franchise requires outbound HTTPS to Master. Keep Lite's web port within the private LAN. No franchise Tally or SFTP port is required. If the network is unavailable, event delivery waits in Lite's durable outbox.
-
-The Master setup configures Tailscale Serve for private HTTPS access to its `/api/v1` routes. This Lite setup installs and joins Tailscale; it does not publish Lite over Tailscale Serve. Tailscale sign-in and any required device approval are one-time account actions. Keep Tally only at Master. The former `Admin → Tally SFTP` setup is obsolete for this central-Tally deployment.
+The older `Setuora-Lite-<version>-windows.cmd` self-extracting release package is a separate installation path under `C:\ProgramData\Setuora\Setuora-Lite-windows`. It cannot replace or coexist with the Git installation on the same computer. Run a newer release package to update that path.

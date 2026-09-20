@@ -16,7 +16,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $ApplicationRoot "deploy.py"))) {
 }
 $ControllerPath = $PSCommandPath
 $ProductName = "Setuora Lite"
-$BrowserUrl = "http://127.0.0.1:8000"
+$BrowserUrl = "https://<lite-name>.<tailnet>.ts.net"
+$CaddyRoot = Join-Path $env:ProgramData "Setuora\caddy-lite"
+$CaddyTaskName = "Setuora-Lite-Caddy"
 Set-Location -LiteralPath $ApplicationRoot
 
 function Test-SetuoraAdministrator {
@@ -44,6 +46,8 @@ function Get-SetuoraPython {
         @{ Name = "py"; Prefix = @("-3") },
         @{ Name = "python"; Prefix = @() },
         @{ Name = "python3"; Prefix = @() },
+        @{ Name = "$env:ProgramFiles\Python313\python.exe"; Prefix = @() },
+        @{ Name = "$env:ProgramFiles\Python312\python.exe"; Prefix = @() },
         @{ Name = "$env:ProgramFiles\Python311\python.exe"; Prefix = @() }
     )
     foreach ($launcher in $launchers) {
@@ -65,17 +69,45 @@ function Get-SetuoraPython {
 }
 
 function Install-SetuoraPython {
-    $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
-    if (-not $winget) {
-        throw "Python 3.11 or newer is required. Install Python from python.org with 'Add Python to PATH' enabled, then choose Setup / repair again."
+    if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+        throw "An x64 Windows 10 or 11 computer is required by the current locked runtime."
     }
-    Write-Host "Installing Python 3.11. Keep this window open..." -ForegroundColor Cyan
-    $code = Invoke-SetuoraNative $winget.Source @(
-        "install", "--id", "Python.Python.3.11", "--exact", "--source", "winget",
-        "--scope", "machine", "--accept-package-agreements", "--accept-source-agreements",
-        "--disable-interactivity"
-    )
-    if ($code -ne 0) { throw "Python installation failed (exit $code). Install Python 3.11 from python.org, then retry Setup / repair." }
+    $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host "Installing Python through Windows Package Manager..." -ForegroundColor Cyan
+        $code = Invoke-SetuoraNative $winget.Source @(
+            "install", "--id", "Python.Python.3.13", "--exact", "--source", "winget",
+            "--scope", "machine", "--accept-package-agreements", "--accept-source-agreements",
+            "--disable-interactivity"
+        )
+        if ($code -eq 0 -and (Get-SetuoraPython)) { return }
+        Write-Host "Windows Package Manager did not provide Python. Trying the signed python.org installer..." -ForegroundColor Yellow
+    }
+
+    # Keep this fallback on an actively supported Python release with Windows installers.
+    # The runtime accepts Python 3.11+ and the locked wheels support Python 3.13.
+    $architecture = "amd64"
+    $version = "3.13.15"
+    $url = "https://www.python.org/ftp/python/$version/python-$version-$architecture.exe"
+    $installer = Join-Path ([IO.Path]::GetTempPath()) ("setuora-python-" + [guid]::NewGuid().ToString("N") + ".exe")
+    try {
+        Write-Host "Downloading the signed Python installer from python.org..." -ForegroundColor Cyan
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+        $signature = Get-AuthenticodeSignature -LiteralPath $installer
+        if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+            $signature.SignerCertificate.Subject -notmatch "Python Software Foundation") {
+            throw "The downloaded Python installer does not have a valid Python Software Foundation signature."
+        }
+        $process = Start-Process -FilePath $installer -ArgumentList @(
+            "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0"
+        ) -Wait -PassThru -WindowStyle Hidden
+        if ($process.ExitCode -notin @(0, 3010)) { throw "Python installation failed (exit $($process.ExitCode))." }
+        if ($process.ExitCode -eq 3010) { throw "Python installed. Restart Windows, then run Setup / repair again." }
+    } finally {
+        Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SetuoraPython)) { throw "Python installed but was not found. Restart Windows and run Setup / repair again." }
 }
 
 function Get-SetuoraTailscale {
@@ -102,9 +134,7 @@ function Install-SetuoraTailscale {
         if ($code -eq 0 -and (Get-SetuoraTailscale)) { return }
         Write-Host "Windows Package Manager did not install Tailscale. Trying the official signed installer..." -ForegroundColor Yellow
     }
-    $architecture = if ([Environment]::Is64BitOperatingSystem -and
-        $env:PROCESSOR_ARCHITECTURE -ne "ARM64" -and
-        $env:PROCESSOR_ARCHITEW6432 -ne "ARM64") { "amd64" } else { "x86" }
+    $architecture = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64" -or $env:PROCESSOR_ARCHITEW6432 -eq "ARM64") { "arm64" } elseif ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "x86" }
     $installer = Join-Path ([IO.Path]::GetTempPath()) ("setuora-tailscale-" + [guid]::NewGuid().ToString("N") + ".msi")
     try {
         $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-$architecture.msi"
@@ -128,6 +158,113 @@ function Install-SetuoraTailscale {
     if (-not (Get-SetuoraTailscale)) { throw "Tailscale installation finished, but tailscale.exe was not found. Restart Windows and retry Setup / repair." }
 }
 
+function Install-SetuoraCaddy([switch]$Upgrade) {
+    $binary = Join-Path $CaddyRoot "caddy.exe"
+    $versionFile = Join-Path $CaddyRoot "VERSION"
+    [IO.Directory]::CreateDirectory($CaddyRoot) | Out-Null
+    if ((Get-Item -LiteralPath $CaddyRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "The Caddy installation folder is a linked path. Setup stopped before changing permissions."
+    }
+    $code = Invoke-SetuoraNative "icacls.exe" @(
+        $CaddyRoot, "/inheritance:r", "/grant:r",
+        "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/T", "/Q", "/L"
+    )
+    if ($code -ne 0) { throw "Caddy files could not be secured for the Windows SYSTEM task." }
+    $code = Invoke-SetuoraNative "icacls.exe" @(
+        $CaddyRoot, "/remove:g", "*S-1-5-32-545", "*S-1-5-11", "*S-1-1-0", "/T", "/Q", "/L"
+    )
+    if ($code -ne 0) { throw "Broad access to Caddy files could not be removed." }
+    if (-not $Upgrade -and (Test-Path -LiteralPath $binary) -and (Test-Path -LiteralPath $versionFile)) { return $binary }
+    $architecture = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64" -or $env:PROCESSOR_ARCHITEW6432 -eq "ARM64") { "arm64" } elseif ([Environment]::Is64BitOperatingSystem) { "amd64" } else { throw "Caddy requires a 64-bit Windows 10 or 11 computer." }
+    Write-Host "Checking the current Caddy release..." -ForegroundColor Cyan
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/caddyserver/caddy/releases/latest" -Headers @{ "User-Agent" = "Setuora-Lite-Installer" }
+    if ($release.tag_name -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "The Caddy release version could not be verified." }
+    $version = $release.tag_name.Substring(1)
+    $assetName = "caddy_${version}_windows_${architecture}.zip"
+    $asset = @($release.assets | Where-Object { $_.name -eq $assetName })
+    if ($asset.Count -ne 1 -or $asset[0].digest -notmatch '^sha256:[0-9a-fA-F]{64}$' -or $asset[0].browser_download_url -notlike "https://github.com/caddyserver/caddy/releases/download/$($release.tag_name)/*") {
+        throw "The official Caddy release asset or SHA-256 digest is missing."
+    }
+    $expectedHash = $asset[0].digest.Substring(7)
+    if ((Test-Path -LiteralPath $binary) -and (Test-Path -LiteralPath $versionFile) -and
+        (Get-Content -LiteralPath $versionFile -Raw).Trim() -eq $version) { return $binary }
+    $stage = Join-Path ([IO.Path]::GetTempPath()) ("setuora-caddy-" + [guid]::NewGuid().ToString("N"))
+    [IO.Directory]::CreateDirectory($stage) | Out-Null
+    try {
+        $zip = Join-Path $stage $assetName
+        Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $zip -UseBasicParsing
+        if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ine $expectedHash) { throw "The Caddy download failed its release SHA-256 check." }
+        Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+        $extracted = Join-Path $stage "caddy.exe"
+        if (-not (Test-Path -LiteralPath $extracted)) { throw "The Caddy release did not contain caddy.exe." }
+        Stop-SetuoraCaddy
+        Copy-Item -LiteralPath $extracted -Destination $binary -Force
+        Set-Content -LiteralPath $versionFile -Value $version -NoNewline
+    } finally {
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    return $binary
+}
+
+function Stop-SetuoraCaddy {
+    if (Get-ScheduledTask -TaskName $CaddyTaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $CaddyTaskName -ErrorAction SilentlyContinue
+    }
+    $binary = Join-Path $CaddyRoot "caddy.exe"
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        $owned = @(Get-CimInstance Win32_Process -Filter "Name='caddy.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -eq $binary })
+        if ($owned.Count -eq 0) { return }
+        Start-Sleep -Seconds 1
+    }
+    throw "The Setuora Caddy process did not stop. Close it before replacing or restarting Caddy."
+}
+
+function Initialize-SetuoraPrivateWeb([switch]$Upgrade) {
+    $tailscale = Get-SetuoraTailscale
+    if (-not $tailscale) { throw "Tailscale is missing. Run Setup / repair again." }
+    $state = Get-SetuoraTailnetState $tailscale
+    if ($state.BackendState -ne "Running" -or -not $state.Self.Online -or -not $state.Self.DNSName) {
+        throw "Tailscale must be online with a MagicDNS name before private HTTPS can be configured."
+    }
+    $tailnetHost = $state.Self.DNSName.TrimEnd('.').ToLowerInvariant()
+    $code = Invoke-SetuoraDeployment "trust-tailnet-host" @("--host", $tailnetHost)
+    if ($code -ne 0) { throw "The private HTTPS hostname could not be added to TRUSTED_HOSTS." }
+    $code = Invoke-SetuoraDeployment "start"
+    if ($code -ne 0) { throw "Lite could not restart with its private HTTPS hostname." }
+    $binary = Install-SetuoraCaddy -Upgrade:$Upgrade
+    $config = Join-Path $CaddyRoot "Caddyfile"
+    Copy-Item -LiteralPath (Join-Path $ApplicationRoot "scripts\windows\Caddyfile.lite") -Destination $config -Force
+    $code = Invoke-SetuoraNative $binary @("validate", "--config", $config, "--adapter", "caddyfile")
+    if ($code -ne 0) { throw "The Caddy configuration is invalid." }
+    Stop-SetuoraCaddy
+    $action = New-ScheduledTaskAction -Execute $binary -Argument ('run --config "' + $config + '" --adapter caddyfile')
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
+    Register-ScheduledTask -TaskName $CaddyTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName $CaddyTaskName
+    $ready = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        try {
+            $response = Invoke-RestMethod -Uri "http://127.0.0.1:8080/health" -TimeoutSec 2
+            if ($response.status -eq "ok" -and $response.role -eq "lite") { $ready = $true; break }
+        } catch { Start-Sleep -Seconds 1 }
+    }
+    if (-not $ready) { throw "Caddy did not proxy Lite on localhost:8080. Check the $CaddyTaskName task status and run Setup / repair." }
+    Write-Host "Enabling private HTTPS through Tailscale Serve..." -ForegroundColor Cyan
+    $serve = Get-SetuoraServeConfig $tailscale
+    Assert-SetuoraServeRoute $serve $tailnetHost $false
+    $routeKey = "$($tailnetHost):443"
+    if (-not ($serve.Web -and $serve.Web.PSObject.Properties[$routeKey])) {
+        $code = Invoke-SetuoraNative $tailscale @("serve", "--bg", "--https=443", "http://127.0.0.1:8080")
+        if ($code -ne 0) { throw "Tailscale Serve could not enable HTTPS. Complete any HTTPS approval shown above, then run Setup / repair again." }
+    }
+    Assert-SetuoraServeRoute (Get-SetuoraServeConfig $tailscale) $tailnetHost $true
+    Write-Host "Staff HTTPS address: https://$tailnetHost" -ForegroundColor Green
+    Write-Host "Join each staff PC to this tailnet, then open this address for camera scanning."
+}
+
 function Get-SetuoraTailnetState([string]$Tailscale) {
     $savedPreference = $ErrorActionPreference
     try {
@@ -140,6 +277,67 @@ function Get-SetuoraTailnetState([string]$Tailscale) {
     if ($code -ne 0) { throw "Tailscale status failed (exit $code): $($output -join ' ')" }
     try { return (($output -join [Environment]::NewLine) | ConvertFrom-Json) }
     catch { throw "Tailscale returned an unreadable status. Restart its Windows service and retry Setup / repair." }
+}
+
+function Get-SetuoraPrivateUrl {
+    $tailscale = Get-SetuoraTailscale
+    if (-not $tailscale) { throw "Tailscale is missing. Run Setup / repair." }
+    $state = Get-SetuoraTailnetState $tailscale
+    if ($state.BackendState -ne "Running" -or -not $state.Self.Online -or -not $state.Self.DNSName) {
+        throw "Tailscale is offline. Connect this computer to the tailnet."
+    }
+    return "https://$($state.Self.DNSName.TrimEnd('.').ToLowerInvariant())"
+}
+
+function Get-SetuoraServeConfig([string]$Tailscale) {
+    $savedPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $Tailscale serve status --json 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedPreference
+    }
+    if ($code -ne 0) { throw "Tailscale Serve status failed (exit $code): $($output -join ' ')" }
+    try {
+        $json = ($output -join [Environment]::NewLine).Trim()
+        if (-not $json -or $json -eq "null") { return [pscustomobject]@{} }
+        return ($json | ConvertFrom-Json)
+    } catch { throw "Tailscale returned unreadable Serve settings. Setup stopped to avoid replacing another route." }
+}
+
+function Assert-SetuoraServeRoute([object]$Config, [string]$TailnetName, [bool]$MustExist) {
+    $routeKey = "$($TailnetName):443"
+    if ($Config.AllowFunnel) {
+        foreach ($entry in $Config.AllowFunnel.PSObject.Properties) {
+            if ($entry.Name -match ':443$' -and $entry.Value) {
+                throw "Tailscale Funnel is enabled on HTTPS port 443. Turn Funnel off before serving private Lite data."
+            }
+        }
+    }
+    if ($Config.TCP) {
+        foreach ($entry in $Config.TCP.PSObject.Properties) {
+            if ($entry.Name -match '(^|:)443$') { throw "Tailscale port 443 is already used by a TCP route." }
+        }
+    }
+    $route = $null
+    if ($Config.Web) {
+        foreach ($entry in $Config.Web.PSObject.Properties) {
+            if ($entry.Name -match ':443$') {
+                if ($entry.Name -ne $routeKey) { throw "Tailscale HTTPS port 443 is already used by another route." }
+                $route = $entry.Value
+            }
+        }
+    }
+    if (-not $route) {
+        if ($MustExist) { throw "The Setuora Lite Tailscale Serve route is missing. Run Setup / repair." }
+        return
+    }
+    $handlers = @($route.Handlers.PSObject.Properties)
+    if ($handlers.Count -ne 1 -or $handlers[0].Name -ne "/" -or
+        $handlers[0].Value.Proxy -ne "http://127.0.0.1:8080") {
+        throw "Tailscale HTTPS port 443 has a different Serve route. Setup stopped without overwriting it."
+    }
 }
 
 function Initialize-SetuoraTailnet {
@@ -172,16 +370,26 @@ function Initialize-SetuoraTailnet {
     if ($state.Self.DNSName) { Write-Host "Lite tailnet name: $($state.Self.DNSName.TrimEnd('.'))" }
 }
 
-function Test-SetuoraTailnetReady {
+function Test-SetuoraTailnetReady([switch]$SkipMasterCheck) {
     $tailscale = Get-SetuoraTailscale
     if (-not $tailscale) {
         throw "Setuora Lite is running locally, but Tailscale is missing. Run Setup / repair to enable Master sync."
     }
     $state = Get-SetuoraTailnetState $tailscale
-    if ($state.BackendState -ne "Running" -or -not $state.Self -or -not $state.Self.Online) {
+    if ($state.BackendState -ne "Running" -or -not $state.Self -or -not $state.Self.Online -or -not $state.Self.DNSName) {
         throw "Setuora Lite is running locally, but Tailscale is offline. Master sync will wait. Check the network or run Setup / repair."
     }
     Write-Host "Tailscale is online for Master sync."
+    $tailnetName = $state.Self.DNSName.TrimEnd('.').ToLowerInvariant()
+    if (-not $SkipMasterCheck) {
+        Assert-SetuoraServeRoute (Get-SetuoraServeConfig $tailscale) $tailnetName $true
+    }
+    try {
+        $health = Invoke-RestMethod -Uri "https://$tailnetName/health" -TimeoutSec 10
+        if ($health.status -ne "ok" -or $health.role -ne "lite") { throw "Wrong service answered." }
+    } catch { throw "Private HTTPS is not healthy. Check the Caddy task and Tailscale Serve; run Setup / repair." }
+    Write-Host "Lite private HTTPS: https://$tailnetName"
+    if ($SkipMasterCheck) { return }
     $code = Invoke-SetuoraDeployment "master-check"
     if ($code -ne 0) { throw "Lite is running locally, but its Master HTTPS route check failed. Review the message above and retry after fixing the connection." }
 }
@@ -236,6 +444,8 @@ function Update-SetuoraSource {
     if (Read-SetuoraGit @("status", "--porcelain", "--untracked-files=all")) {
         throw "The source checkout has local changes. Save or commit them before updating. Nothing has been stopped or overwritten."
     }
+    $code = Invoke-SetuoraDeployment "backup"
+    if ($code -ne 0) { throw "A verified SQLite backup could not be created. The update was not started." }
     $branch = Read-SetuoraGit @("branch", "--show-current")
     if (-not $branch) { throw "Check out a Git branch before updating; detached HEAD cannot be updated automatically." }
     Write-Host "Checking origin/$branch for updates..." -ForegroundColor Cyan
@@ -263,6 +473,7 @@ function Update-SetuoraSource {
         $null = Invoke-SetuoraDeployment "start"
         return $code
     }
+    Initialize-SetuoraPrivateWeb -Upgrade
     Test-SetuoraTailnetReady
     return 0
 }
@@ -299,7 +510,7 @@ function Show-SetuoraHelp {
 }
 
 function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @()) {
-    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime")) {
+    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "logs")) {
         if (-not (Test-SetuoraAdministrator)) { return Invoke-SetuoraElevated $Action $ExtraArguments }
     }
     switch ($Action) {
@@ -308,25 +519,28 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
             $code = Invoke-SetuoraDeployment "setup" $ExtraArguments
             if ($code -ne 0) { return $code }
             Initialize-SetuoraTailnet
+            Initialize-SetuoraPrivateWeb
             Test-SetuoraTailnetReady
             return 0
         }
         "start" {
             $code = Invoke-SetuoraDeployment "start" $ExtraArguments
             if ($code -ne 0) { return $code }
+            Initialize-SetuoraPrivateWeb
             Test-SetuoraTailnetReady
             return 0
         }
         "status" {
             $code = Invoke-SetuoraDeployment "status" $ExtraArguments
             if ($code -ne 0) { return $code }
-            Test-SetuoraTailnetReady
+            Test-SetuoraTailnetReady -SkipMasterCheck
             return 0
         }
         "open" {
             $code = Invoke-SetuoraDeployment "status"
             if ($code -ne 0) { return $code }
-            Start-Process -FilePath $BrowserUrl
+            Test-SetuoraTailnetReady -SkipMasterCheck
+            Start-Process -FilePath (Get-SetuoraPrivateUrl)
             return 0
         }
         "update" {
@@ -336,6 +550,7 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
         "update-runtime" {
             $code = Invoke-SetuoraDeployment "update"
             if ($code -ne 0) { return $code }
+            Initialize-SetuoraPrivateWeb -Upgrade
             Test-SetuoraTailnetReady
             return 0
         }

@@ -1,6 +1,6 @@
 # Lite release checklist
 
-- [ ] The Windows startup task survives a reboot and the Lite web port is limited to the franchise private LAN.
+- [ ] The Lite and Caddy startup tasks survive a reboot; Lite and Caddy listen on localhost only, and Tailscale Serve provides private HTTPS.
 - [ ] Each Lite has a permanent, unique franchise code and its own Master node credential.
 - [ ] The configured Master URL is an exact HTTPS origin with a valid certificate.
 - [ ] Inventory initialization completes once and its baseline event is accepted by Master.
