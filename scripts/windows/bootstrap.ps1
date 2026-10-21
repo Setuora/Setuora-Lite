@@ -78,7 +78,7 @@ function Install-Git {
             & $winget.Source install --id Git.Git --exact --source winget --scope machine --accept-package-agreements --accept-source-agreements --disable-interactivity
             $code = $LASTEXITCODE
         } finally { $ErrorActionPreference = $oldPreference }
-        if ($code -eq 3010) { throw 'Git installed. Restart Windows, then double-click install-lite.bat again.' }
+        if ($code -eq 3010) { throw 'Git installed. Restart Windows, then choose Start in setuora.bat again.' }
         if ($code -eq 0 -and (Find-Git)) { return }
         Write-Host 'Windows Package Manager did not provide Git. Trying the signed official installer.' -ForegroundColor Yellow
     }
@@ -104,11 +104,11 @@ function Install-Git {
             '/VERYSILENT', '/NORESTART', '/SP-', '/SUPPRESSMSGBOXES', '/o:PathOption=Cmd'
         ) -Wait -PassThru -WindowStyle Hidden
         if ($process.ExitCode -notin @(0, 3010)) { throw "Git installation failed (exit $($process.ExitCode))." }
-        if ($process.ExitCode -eq 3010) { throw 'Git installed. Restart Windows, then double-click install-lite.bat again.' }
+        if ($process.ExitCode -eq 3010) { throw 'Git installed. Restart Windows, then choose Start in setuora.bat again.' }
     } finally {
         Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
     }
-    if (-not (Find-Git)) { throw 'Git installed but was not found. Restart Windows and double-click install-lite.bat again.' }
+    if (-not (Find-Git)) { throw 'Git installed but was not found. Restart Windows and choose Start in setuora.bat again.' }
 }
 
 function Invoke-Git([string[]]$Arguments) {
@@ -132,7 +132,7 @@ function Invoke-Controller([string]$Action) {
 function Backup-Lite {
     $python = Join-Path $InstallRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) {
-        throw 'The existing Python runtime is missing. Use the Lite Setup / repair control before updating.'
+        throw 'The existing Python runtime is missing. Run the installed setuora.bat setup command before updating.'
     }
     Write-Host 'Creating a verified SQLite backup before updating...'
     Push-Location -LiteralPath $InstallRoot
@@ -152,12 +152,12 @@ function Test-Task([string]$Name) {
 }
 
 try {
-    if (-not (Test-Administrator)) { throw 'Run install-lite.bat and approve its Administrator prompt.' }
+    if (-not (Test-Administrator)) { throw 'Choose Start in setuora.bat and approve its Administrator prompt.' }
     if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
         throw 'This release needs an x64 Windows 10 or 11 computer. The locked Python runtime does not support Windows ARM64 or 32-bit.'
     }
     if (Test-Path -LiteralPath (Join-Path $PackagedRoot '.env')) {
-        throw "A packaged Lite is already installed in $PackagedRoot. Update it with its release installer; this Git installer will not replace it."
+        throw "A packaged Lite is already installed in $PackagedRoot. Update it with its release installer; Start will not replace it with a Git installation."
     }
     $taskExists = if (-not (Test-Path -LiteralPath $InstallRoot)) { Test-Task 'Setuora-Lite' } else { $false }
     if (-not (Test-Path -LiteralPath $InstallRoot) -and $taskExists) {
@@ -206,7 +206,7 @@ try {
                 $null = Invoke-Git @('-C', $InstallRoot, 'merge', '--ff-only', "origin/$Branch")
             } catch {
                 if (Test-Path -LiteralPath (Join-Path $InstallRoot '.env')) {
-                    try { Invoke-Controller 'start' } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
+                    try { Invoke-Controller 'setup' } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
                 }
                 throw
             }

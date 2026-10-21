@@ -62,7 +62,6 @@ def test_environment_writer_preserves_secret_characters(tmp_path, monkeypatch):
 def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     controller = (PROJECT_ROOT / "setuora.bat").read_text(encoding="utf-8")
     launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
-    finder = (PROJECT_ROOT / "scripts/find_python.bat").read_text(encoding="utf-8")
 
     assert 'set "ROOT_DIR=%~dp0"' in controller
     assert "%ROOT_DIR%setuora.ps1" in controller
@@ -94,32 +93,91 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     ):
         assert f'"{action}"' in launcher
     assert "Show-SetuoraMenu" in launcher
-    assert "Install downloaded update" in launcher
+    assert '"1" { "start" }; "2" { "stop" }; "3" { "uninstall" }' in launcher
+    assert "Choose (close this window to exit)" in launcher
     assert "$ApplicationRoot\\.venv\\Scripts\\python.exe" in launcher
-    assert finder.index("..\\.venv\\Scripts\\python.exe") < finder.index("py -3.11")
-    for script_name, action in (
-        ("setup.bat", "setup"),
-        ("start_setuora.bat", "start"),
-        ("stop_setuora.bat", "stop"),
-        ("update.bat", "update"),
-    ):
-        wrapper = (PROJECT_ROOT / "scripts" / script_name).read_text(encoding="utf-8")
-        assert f'call "%~dp0..\\setuora.bat" {action} %*' in wrapper
-        assert "endlocal & exit /b %EXIT_CODE%" in wrapper
+    # Like the reference installer, setuora.bat is the only batch file and its
+    # Start installs into ProgramData through the bootstrap.
+    assert sorted(
+        path.relative_to(PROJECT_ROOT).as_posix()
+        for path in PROJECT_ROOT.rglob("*.bat")
+        if not {"archive", "node_modules", ".venv"} & set(path.relative_to(PROJECT_ROOT).parts)
+    ) == ["setuora.bat"]
+    start = launcher.split("function Invoke-SetuoraStart", 1)[1].split("\nfunction ", 1)[0]
+    assert 'Join-Path $ApplicationRoot "scripts\\windows\\bootstrap.ps1"' in start
+    assert '"$ProgramDataRoot\\Setuora\\Setuora-Lite"' in launcher
 
 
-def test_source_update_stops_before_mutating_application_files():
+def test_start_updates_source_after_backup_and_stop_then_runs_setup():
     launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
     update = launcher[
-        launcher.index("function Update-SetuoraSource") : launcher.index(
-            "function Install-SetuoraUpdate"
+        launcher.index("function Update-SetuoraCheckout") : launcher.index(
+            "function Invoke-SetuoraSetup"
         )
     ]
+    start = launcher.split("function Invoke-SetuoraStart", 1)[1].split("\nfunction ", 1)[0]
     assert "--porcelain" in update and "--untracked-files=all" in update
     assert "--is-ancestor" in update
+    assert '$env:GIT_TERMINAL_PROMPT = "0"' in update
     assert update.index('"fetch"') < update.index('Invoke-SetuoraDeployment "stop"')
+    assert update.index('Invoke-SetuoraDeployment "backup"') < update.index('Invoke-SetuoraDeployment "stop"')
     assert update.index('Invoke-SetuoraDeployment "stop"') < update.index('"merge", "--ff-only"')
-    assert update.index('"merge", "--ff-only"') < update.index('Invoke-SetuoraDeployment "update"')
+    assert start.index("Update-SetuoraCheckout") < start.index("Invoke-SetuoraSetup")
+
+
+def test_stop_disables_lite_and_caddy_startup_until_start(monkeypatch):
+    import argparse
+
+    launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
+    stop = launcher.split("function Invoke-SetuoraStop", 1)[1].split("\nfunction ", 1)[0]
+    assert stop.index("Disable-SetuoraServeRoute") < stop.index("Stop-SetuoraCaddy")
+    assert "Disable-ScheduledTask -TaskName $CaddyTaskName" in stop
+
+    calls = []
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: calls.append(args[:4]))
+    monkeypatch.setattr(deploy, "_wait_for_stop", lambda **kwargs: None)
+    deploy.stop(argparse.Namespace())
+    assert calls == [
+        ("/Change", "/TN", deploy.TASK_NAME, "/DISABLE"),
+        ("/End", "/TN", deploy.TASK_NAME),
+    ]
+
+
+def test_start_reenables_task_and_failed_setup_leaves_lite_stopped(monkeypatch):
+    import argparse
+    import subprocess
+
+    import pytest
+
+    calls = []
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    monkeypatch.setattr(
+        deploy,
+        "_task",
+        lambda *args, **kwargs: calls.append(args) or subprocess.CompletedProcess(args, 0),
+    )
+    monkeypatch.setattr(deploy, "_wait_for_stop", lambda **kwargs: None)
+    monkeypatch.setattr(deploy, "_assign_free_port", lambda *args, **kwargs: 8000)
+    monkeypatch.setattr(deploy, "_wait_for_health", lambda **kwargs: None)
+    deploy.start(argparse.Namespace())
+    enable = ("/Change", "/TN", deploy.TASK_NAME, "/ENABLE")
+    assert calls.index(enable) < calls.index(("/Run", "/TN", deploy.TASK_NAME))
+
+    events = []
+    monkeypatch.setattr(deploy, "_prepare_environment", lambda: None)
+    for name in ("_install_runtime", "_secure_code_permissions", "_remove_legacy_lan_firewall", "_ensure_task"):
+        monkeypatch.setattr(deploy, name, lambda: None)
+    monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
+
+    def unhealthy(**kwargs):
+        raise deploy.DeploymentError("not healthy")
+
+    monkeypatch.setattr(deploy, "_wait_for_health", unhealthy)
+    with pytest.raises(deploy.DeploymentError, match="not healthy"):
+        deploy.setup(argparse.Namespace())
+    assert events == ["stop"]
 
 
 def _valid_environment():
@@ -308,7 +366,7 @@ def test_stop_uses_owned_process_check_and_leaves_foreign_listener_alone(monkeyp
 
     events = []
     monkeypatch.setattr(deploy, "_check_windows", lambda: None)
-    monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: events.append("task-end"))
+    monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: events.append(args[0]))
     monkeypatch.setattr(deploy, "_port_listeners", lambda port: (_ for _ in ()).throw(AssertionError("foreign listener should remain untouched")))
     monkeypatch.setattr(
         deploy,
@@ -317,7 +375,7 @@ def test_stop_uses_owned_process_check_and_leaves_foreign_listener_alone(monkeyp
     )
     monkeypatch.setattr(deploy.time, "sleep", lambda _: None)
     deploy.stop(argparse.Namespace())
-    assert events == ["task-end"]
+    assert events == ["/Change", "/End"]
 
 
 def test_no_listener_is_free_even_when_loopback_connections_time_out(monkeypatch):
@@ -631,7 +689,7 @@ def test_start_recommends_repair_when_background_task_is_missing(monkeypatch):
         return subprocess.CompletedProcess(args, 1, stdout="")
 
     monkeypatch.setattr(deploy, "_task", missing_task)
-    with pytest.raises(deploy.DeploymentError, match="Choose Setup / repair"):
+    with pytest.raises(deploy.DeploymentError, match="Choose Start to repair it"):
         deploy.start(argparse.Namespace())
     assert len(calls) == 1
     assert calls[0][0] == "/Query"

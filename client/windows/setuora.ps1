@@ -17,9 +17,24 @@ if (-not (Test-Path -LiteralPath (Join-Path $ApplicationRoot "deploy.py"))) {
 $ControllerPath = $PSCommandPath
 $ProductName = "Setuora Lite"
 $BrowserUrl = "https://<lite-name>.<tailnet>.ts.net"
-$CaddyRoot = Join-Path $env:ProgramData "Setuora\caddy-lite"
+$ProgramDataRoot = if ($env:ProgramData) { $env:ProgramData } else { "C:\ProgramData" }
+$CaddyRoot = "$ProgramDataRoot\Setuora\caddy-lite"
 $CaddyTaskName = "Setuora-Lite-Caddy"
 Set-Location -LiteralPath $ApplicationRoot
+
+function Get-SetuoraInstalledRoot {
+    # Like the Vaultio controls, Start installs into ProgramData, and controls
+    # run from a downloaded or cloned folder manage that installation.
+    $roots = @("$ProgramDataRoot\Setuora\Setuora-Lite", "$ProgramDataRoot\Setuora\Setuora-Lite-windows")
+    $current = [IO.Path]::GetFullPath($ApplicationRoot).TrimEnd('\')
+    foreach ($root in $roots) {
+        if ($current -ieq [IO.Path]::GetFullPath($root).TrimEnd('\')) { return $ApplicationRoot }
+    }
+    foreach ($root in $roots) {
+        if (Test-Path -LiteralPath "$root\deploy.py") { return $root }
+    }
+    return $null
+}
 
 function Test-SetuoraAdministrator {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -103,11 +118,11 @@ function Install-SetuoraPython {
             "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0"
         ) -Wait -PassThru -WindowStyle Hidden
         if ($process.ExitCode -notin @(0, 3010)) { throw "Python installation failed (exit $($process.ExitCode))." }
-        if ($process.ExitCode -eq 3010) { throw "Python installed. Restart Windows, then run Setup / repair again." }
+        if ($process.ExitCode -eq 3010) { throw "Python installed. Restart Windows, then choose Start again." }
     } finally {
         Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
     }
-    if (-not (Get-SetuoraPython)) { throw "Python installed but was not found. Restart Windows and run Setup / repair again." }
+    if (-not (Get-SetuoraPython)) { throw "Python installed but was not found. Restart Windows and choose Start again." }
 }
 
 function Get-SetuoraTailscale {
@@ -149,13 +164,13 @@ function Install-SetuoraTailscale {
             "/i", ('"' + $installer + '"'), "/qn", "/norestart"
         ) -Wait -PassThru
         if ($process.ExitCode -eq 3010) {
-            throw "Tailscale installed but Windows requires a restart. Restart this computer, then run Setup / repair again."
+            throw "Tailscale installed but Windows requires a restart. Restart this computer, then choose Start again."
         }
         if ($process.ExitCode -ne 0) { throw "Tailscale installation failed (exit $($process.ExitCode))." }
     } finally {
         Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
     }
-    if (-not (Get-SetuoraTailscale)) { throw "Tailscale installation finished, but tailscale.exe was not found. Restart Windows and retry Setup / repair." }
+    if (-not (Get-SetuoraTailscale)) { throw "Tailscale installation finished, but tailscale.exe was not found. Restart Windows and choose Start again." }
 }
 
 function Install-SetuoraCaddy([switch]$Upgrade) {
@@ -236,12 +251,12 @@ function Get-SetuoraSavedPorts {
             if (-not [int]::TryParse([string]$port, [ref]$parsed) -or $parsed -lt 1024 -or $parsed -gt 65535) { throw 'Invalid port' }
         }
         return $ports
-    } catch { throw 'The saved Lite ports are unreadable. Run Setup / repair.' }
+    } catch { throw 'The saved Lite ports are unreadable. Choose Start.' }
 }
 
 function Initialize-SetuoraPrivateWeb([switch]$Upgrade) {
     $tailscale = Get-SetuoraTailscale
-    if (-not $tailscale) { throw "Tailscale is missing. Run Setup / repair again." }
+    if (-not $tailscale) { throw "Tailscale is missing. Choose Start again." }
     $state = Get-SetuoraTailnetState $tailscale
     if ($state.BackendState -ne "Running" -or -not $state.Self.Online -or -not $state.Self.DNSName) {
         throw "Tailscale must be online with a MagicDNS name before private HTTPS can be configured."
@@ -276,7 +291,7 @@ function Initialize-SetuoraPrivateWeb([switch]$Upgrade) {
             if ($response.status -eq "ok" -and $response.role -eq "lite") { $ready = $true; break }
         } catch { Start-Sleep -Seconds 1 }
     }
-    if (-not $ready) { throw "Caddy did not proxy Lite on localhost:$($ports.caddy_port). Check the $CaddyTaskName task status and run Setup / repair." }
+    if (-not $ready) { throw "Caddy did not proxy Lite on localhost:$($ports.caddy_port). Check the $CaddyTaskName task status and choose Start." }
     Write-Host "Enabling private HTTPS through Tailscale Serve..." -ForegroundColor Cyan
     $serve = Get-SetuoraServeConfig $tailscale
     Assert-SetuoraServeRoute $serve $tailnetHost $false $ports.caddy_port $previousPorts.caddy_port
@@ -284,7 +299,7 @@ function Initialize-SetuoraPrivateWeb([switch]$Upgrade) {
     $rootRoute = if ($serve.Web -and $serve.Web.PSObject.Properties[$routeKey]) { $serve.Web.PSObject.Properties[$routeKey].Value.Handlers.PSObject.Properties['/'] } else { $null }
     if (-not $rootRoute -or $rootRoute.Value.Proxy -ne "http://127.0.0.1:$($ports.caddy_port)") {
         $code = Invoke-SetuoraNative $tailscale @("serve", "--bg", "--https=443", "--set-path=/", "http://127.0.0.1:$($ports.caddy_port)")
-        if ($code -ne 0) { throw "Tailscale Serve could not enable HTTPS. Complete any HTTPS approval shown above, then run Setup / repair again." }
+        if ($code -ne 0) { throw "Tailscale Serve could not enable HTTPS. Complete any HTTPS approval shown above, then choose Start again." }
     }
     Assert-SetuoraServeRoute (Get-SetuoraServeConfig $tailscale) $tailnetHost $true $ports.caddy_port
     Write-Host "Staff HTTPS address: https://$tailnetHost" -ForegroundColor Green
@@ -302,12 +317,12 @@ function Get-SetuoraTailnetState([string]$Tailscale) {
     }
     if ($code -ne 0) { throw "Tailscale status failed (exit $code): $($output -join ' ')" }
     try { return (($output -join [Environment]::NewLine) | ConvertFrom-Json) }
-    catch { throw "Tailscale returned an unreadable status. Restart its Windows service and retry Setup / repair." }
+    catch { throw "Tailscale returned an unreadable status. Restart its Windows service and choose Start again." }
 }
 
 function Get-SetuoraPrivateUrl {
     $tailscale = Get-SetuoraTailscale
-    if (-not $tailscale) { throw "Tailscale is missing. Run Setup / repair." }
+    if (-not $tailscale) { throw "Tailscale is missing. Choose Start." }
     $state = Get-SetuoraTailnetState $tailscale
     if ($state.BackendState -ne "Running" -or -not $state.Self.Online -or -not $state.Self.DNSName) {
         throw "Tailscale is offline. Connect this computer to the tailnet."
@@ -362,12 +377,12 @@ function Assert-SetuoraServeRoute([object]$Config, [string]$TailnetName, [bool]$
         }
     }
     if (-not $route) {
-        if ($MustExist) { throw "The Setuora Lite Tailscale Serve route is missing. Run Setup / repair." }
+        if ($MustExist) { throw "The Setuora Lite Tailscale Serve route is missing. Choose Start." }
         return
     }
     $rootHandler = if ($route.Handlers) { $route.Handlers.PSObject.Properties['/'] } else { $null }
     if (-not $rootHandler) {
-        if ($MustExist) { throw "The Setuora Lite Tailscale Serve root route is missing. Run Setup / repair." }
+        if ($MustExist) { throw "The Setuora Lite Tailscale Serve root route is missing. Choose Start." }
         return
     }
     $allowed = @("http://127.0.0.1:$CaddyPort")
@@ -384,7 +399,7 @@ function Initialize-SetuoraTailnet {
         $tailscale = Get-SetuoraTailscale
     }
     $service = Get-Service -Name "Tailscale" -ErrorAction SilentlyContinue
-    if (-not $service) { throw "The Tailscale Windows service is missing. Repair Tailscale, then retry Setup / repair." }
+    if (-not $service) { throw "The Tailscale Windows service is missing. Repair Tailscale, then choose Start again." }
     Set-Service -Name "Tailscale" -StartupType Automatic
     if ($service.Status -ne "Running") { Start-Service -Name "Tailscale" }
     # A just-installed service may not answer status yet; `up` can initialize it.
@@ -396,12 +411,12 @@ function Initialize-SetuoraTailnet {
         Write-Host "Connecting this Lite computer to Tailscale. If shown a sign-in link, open it and sign in to the same tailnet as Master." -ForegroundColor Cyan
         $code = Invoke-SetuoraNative $tailscale @("up", "--unattended=true", "--timeout=10m")
     }
-    if ($code -ne 0) { throw "Tailscale sign-in or unattended mode failed (exit $code). Complete the sign-in and retry Setup / repair." }
+    if ($code -ne 0) { throw "Tailscale sign-in or unattended mode failed (exit $code). Complete the sign-in and choose Start again." }
     $code = Invoke-SetuoraNative $tailscale @("set", "--accept-dns=true")
-    if ($code -ne 0) { throw "Tailscale could not enable tailnet DNS (exit $code). Retry Setup / repair." }
+    if ($code -ne 0) { throw "Tailscale could not enable tailnet DNS (exit $code). Choose Start again." }
     $state = Get-SetuoraTailnetState $tailscale
     if ($state.BackendState -ne "Running" -or -not $state.Self -or -not $state.Self.Online) {
-        throw "Tailscale is not online. Check the sign-in or device approval, then retry Setup / repair."
+        throw "Tailscale is not online. Check the sign-in or device approval, then choose Start again."
     }
     Write-Host "Tailscale is online and will stay connected after logout."
     if ($state.Self.DNSName) { Write-Host "Lite tailnet name: $($state.Self.DNSName.TrimEnd('.'))" }
@@ -410,11 +425,11 @@ function Initialize-SetuoraTailnet {
 function Test-SetuoraTailnetReady([switch]$SkipMasterCheck) {
     $tailscale = Get-SetuoraTailscale
     if (-not $tailscale) {
-        throw "Setuora Lite is running locally, but Tailscale is missing. Run Setup / repair to enable Master sync."
+        throw "Setuora Lite is running locally, but Tailscale is missing. Choose Start to enable Master sync."
     }
     $state = Get-SetuoraTailnetState $tailscale
     if ($state.BackendState -ne "Running" -or -not $state.Self -or -not $state.Self.Online -or -not $state.Self.DNSName) {
-        throw "Setuora Lite is running locally, but Tailscale is offline. Master sync will wait. Check the network or run Setup / repair."
+        throw "Setuora Lite is running locally, but Tailscale is offline. Master sync will wait. Check the network or choose Start."
     }
     Write-Host "Tailscale is online for Master sync."
     $tailnetName = $state.Self.DNSName.TrimEnd('.').ToLowerInvariant()
@@ -424,7 +439,7 @@ function Test-SetuoraTailnetReady([switch]$SkipMasterCheck) {
     try {
         $health = Invoke-RestMethod -Uri "https://$tailnetName/health" -TimeoutSec 10
         if ($health.status -ne "ok" -or $health.role -ne "lite") { throw "Wrong service answered." }
-    } catch { throw "Private HTTPS is not healthy. Check the Caddy task and Tailscale Serve; run Setup / repair." }
+    } catch { throw "Private HTTPS is not healthy. Check the Caddy task and Tailscale Serve; choose Start." }
     Write-Host "Lite private HTTPS: https://$tailnetName"
     if ($SkipMasterCheck) { return }
     $code = Invoke-SetuoraDeployment "master-check"
@@ -437,7 +452,7 @@ function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @
         Install-SetuoraPython
         $python = Get-SetuoraPython
     }
-    if (-not $python) { throw "Python 3.11 or newer was not found. Choose Setup / repair first." }
+    if (-not $python) { throw "Python 3.11 or newer was not found. Choose Start to install it." }
     $arguments = @($python["Prefix"]) + @((Join-Path $ApplicationRoot "deploy.py"), $Action) + $ExtraArguments
     return Invoke-SetuoraNative ([string]$python["Name"]) $arguments
 }
@@ -473,46 +488,132 @@ function Read-SetuoraGit([string[]]$Arguments) {
     return ($output -join [Environment]::NewLine).Trim()
 }
 
-function Update-SetuoraSource {
-    if (-not (Get-Command "git.exe" -ErrorAction SilentlyContinue)) { throw "Git for Windows is required to update this source checkout." }
-    $code = Invoke-SetuoraDeployment "preflight"
-    if ($code -ne 0) { return $code }
-    $null = Read-SetuoraGit @("rev-parse", "--is-inside-work-tree")
-    if (Read-SetuoraGit @("status", "--porcelain", "--untracked-files=all")) {
-        throw "The source checkout has local changes. Save or commit them before updating. Nothing has been stopped or overwritten."
+function Update-SetuoraCheckout {
+    # Fast-forward only a clean checkout that has an upstream. When Git is
+    # unreachable, the checkout has local changes or its history diverged,
+    # warn and let Start run the current commit. Returns $true after an update.
+    if (-not (Get-Command "git.exe" -ErrorAction SilentlyContinue)) {
+        Write-Warning "Git for Windows is missing; starting the current version without checking for updates."
+        return $false
     }
-    $code = Invoke-SetuoraDeployment "backup"
-    if ($code -ne 0) { throw "A verified SQLite backup could not be created. The update was not started." }
-    $branch = Read-SetuoraGit @("branch", "--show-current")
-    if (-not $branch) { throw "Check out a Git branch before updating; detached HEAD cannot be updated automatically." }
-    Write-Host "Checking origin/$branch for updates..." -ForegroundColor Cyan
-    $null = Read-SetuoraGit @("fetch", "--quiet", "origin")
-    $null = Read-SetuoraGit @("rev-parse", "--verify", "refs/remotes/origin/$branch")
-    $null = Read-SetuoraGit @("merge-base", "--is-ancestor", "HEAD", "origin/$branch")
-    $code = Invoke-SetuoraDeployment "stop"
-    if ($code -ne 0) { return $code }
+    $env:GIT_TERMINAL_PROMPT = "0"
+    try {
+        if (Read-SetuoraGit @("status", "--porcelain", "--untracked-files=all")) {
+            Write-Warning "The source checkout has local changes; starting the current version without updating it."
+            return $false
+        }
+        $branch = Read-SetuoraGit @("branch", "--show-current")
+        if (-not $branch) {
+            Write-Warning "The checkout is not on a branch; starting the current version without updating it."
+            return $false
+        }
+        Write-Host "Checking origin/$branch for updates..." -ForegroundColor Cyan
+        $null = Read-SetuoraGit @("fetch", "--quiet", "origin")
+        $null = Read-SetuoraGit @("rev-parse", "--verify", "refs/remotes/origin/$branch")
+        if ((Read-SetuoraGit @("rev-parse", "HEAD")) -eq (Read-SetuoraGit @("rev-parse", "origin/$branch"))) { return $false }
+    } catch {
+        Write-Warning "Updates could not be checked ($($_.Exception.Message)). Starting the current version."
+        return $false
+    }
+    try {
+        $null = Read-SetuoraGit @("merge-base", "--is-ancestor", "HEAD", "origin/$branch")
+    } catch {
+        Write-Warning "This checkout has diverged from origin/$branch; starting the current version without updating it."
+        return $false
+    }
+    if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".env")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".venv\Scripts\python.exe"))) {
+            # No runtime means no verified backup; repair the current version first.
+            Write-Warning "The installed runtime is missing; repairing the current version. Choose Start again afterwards to update."
+            return $false
+        }
+        $code = Invoke-SetuoraDeployment "preflight"
+        if ($code -ne 0) { throw "Configuration check failed; Lite was not updated." }
+        $code = Invoke-SetuoraDeployment "backup"
+        if ($code -ne 0) { throw "A verified SQLite backup could not be created. Lite was not updated." }
+        $code = Invoke-SetuoraDeployment "stop"
+        if ($code -ne 0) { throw "Lite could not be stopped for the update; no files were changed." }
+    }
     try {
         $null = Read-SetuoraGit @("merge", "--ff-only", "origin/$branch")
     } catch {
-        Write-Host "The source update failed. Attempting to restart the previous installation..." -ForegroundColor Yellow
-        $null = Invoke-SetuoraDeployment "start"
-        throw
+        Write-Warning "The update could not be applied ($($_.Exception.Message)). Starting the current version."
+        return $false
     }
-    try {
-        $code = Invoke-SetuoraDeployment "update"
-    } catch {
-        Write-Host "The updated installation failed. Attempting a restart..." -ForegroundColor Yellow
-        $null = Invoke-SetuoraDeployment "start"
-        throw
-    }
-    if ($code -ne 0) {
-        Write-Host "The updated installation did not start cleanly (exit $code). Attempting a restart..." -ForegroundColor Yellow
-        $null = Invoke-SetuoraDeployment "start"
-        return $code
-    }
-    Initialize-SetuoraPrivateWeb -Upgrade
+    return $true
+}
+
+function Invoke-SetuoraSetup([switch]$Upgrade) {
+    $code = Invoke-SetuoraDeployment "setup"
+    if ($code -ne 0) { return $code }
+    Initialize-SetuoraTailnet
+    Initialize-SetuoraPrivateWeb -Upgrade:$Upgrade
     Test-SetuoraTailnetReady
     return 0
+}
+
+function Invoke-SetuoraInteractive([string]$Script, [string[]]$Arguments = @()) {
+    # Give the child this console itself so its prompts stay visible.
+    $argumentLine = '-NoLogo -NoProfile -ExecutionPolicy Bypass -File "' + $Script + '"'
+    foreach ($argument in $Arguments) { $argumentLine += ' ' + $argument }
+    $process = Start-Process -FilePath "powershell.exe" -ArgumentList $argumentLine -NoNewWindow -Wait -PassThru
+    return [int]$process.ExitCode
+}
+
+function Invoke-SetuoraInstalledControls([string]$Root, [string]$Action) {
+    $controller = Join-Path $Root "client\windows\setuora.ps1"
+    if (-not (Test-Path -LiteralPath $controller)) { $controller = Join-Path $Root "setuora.ps1" }
+    # This window is already elevated; the original window opens the browser.
+    return Invoke-SetuoraInteractive $controller @($Action, "-Elevated")
+}
+
+function Invoke-SetuoraStart {
+    # Start installs, repairs or updates Lite, then runs and verifies it.
+    $installed = Get-SetuoraInstalledRoot
+    if ($installed -ne $ApplicationRoot) {
+        if ($installed) { return Invoke-SetuoraInstalledControls $installed "start" }
+        # First installation: clone the official checkout into ProgramData and set it up.
+        return Invoke-SetuoraInteractive (Join-Path $ApplicationRoot "scripts\windows\bootstrap.ps1")
+    }
+    $updated = $false
+    if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) { $updated = Update-SetuoraCheckout }
+    return Invoke-SetuoraSetup -Upgrade:$updated
+}
+
+function Disable-SetuoraServeRoute {
+    # Remove only Lite's own HTTPS root route; an offline tailnet does not block Stop.
+    $tailscale = Get-SetuoraTailscale
+    if (-not $tailscale) { return }
+    try {
+        $state = Get-SetuoraTailnetState $tailscale
+        $serve = Get-SetuoraServeConfig $tailscale
+    } catch {
+        Write-Warning "Tailscale is offline; its Lite route is checked again at the next Start."
+        return
+    }
+    if (-not $state.Self -or -not $state.Self.DNSName) { return }
+    $routeKey = "$($state.Self.DNSName.TrimEnd('.').ToLowerInvariant()):443"
+    $route = if ($serve.Web) { $serve.Web.PSObject.Properties[$routeKey] } else { $null }
+    $root = if ($route -and $route.Value.Handlers) { $route.Value.Handlers.PSObject.Properties['/'] } else { $null }
+    if ($root -and $root.Value.Proxy -eq "http://127.0.0.1:$((Get-SetuoraSavedPorts).caddy_port)") {
+        $code = Invoke-SetuoraNative $tailscale @("serve", "--https=443", "--set-path=/", "off")
+        if ($code -ne 0) { throw "Tailscale did not remove the Lite HTTPS route. Retry Stop." }
+    }
+}
+
+function Invoke-SetuoraStop {
+    Disable-SetuoraServeRoute
+    # Disable Caddy's boot task so a stopped Lite stays stopped after a restart.
+    if (Get-ScheduledTask -TaskName $CaddyTaskName -ErrorAction SilentlyContinue) {
+        $null = Disable-ScheduledTask -TaskName $CaddyTaskName
+    }
+    Stop-SetuoraCaddy
+    return Invoke-SetuoraDeployment "stop"
+}
+
+function Open-SetuoraBrowser {
+    try { Start-Process -FilePath (Get-SetuoraPrivateUrl) }
+    catch { Write-Host "Lite is running. Open its private HTTPS address from a PC on the tailnet: $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
 function Install-SetuoraUpdate {
@@ -539,20 +640,34 @@ function Install-SetuoraUpdate {
 
 function Show-SetuoraHelp {
     Write-Host "$ProductName controls"
-    Write-Host "Double-click setuora.bat to open the menu."
-    Write-Host "Commands: setup, start, stop, status, open, logs, preflight, update, uninstall, help"
-    Write-Host "Setup, Start, Stop, Check configuration and Update request Administrator access."
-    Write-Host "Source updates use Git. Installed copies ask you to choose a downloaded installer."
+    Write-Host "Double-click setuora.bat to open the menu: Start, Stop, Uninstall."
+    Write-Host "Start installs Lite in $ProgramDataRoot\Setuora, or repairs or updates it, runs it and opens the browser."
+    Write-Host "Stop keeps Lite stopped, even after Windows restarts, until you choose Start."
+    Write-Host "Uninstall saves a verified recovery copy, then removes the application."
+    Write-Host "Commands: start, stop, uninstall, setup, status, open, logs, preflight, update, help"
+    Write-Host "Every command except status, open and help requests Administrator access."
     Write-Host "Browser: $BrowserUrl"
 }
 
 function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @()) {
     if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "uninstall", "logs")) {
-        if (-not (Test-SetuoraAdministrator)) { return Invoke-SetuoraElevated $Action $ExtraArguments }
+        if (-not (Test-SetuoraAdministrator)) {
+            $code = Invoke-SetuoraElevated $Action $ExtraArguments
+            # Open the browser on the original user's desktop, not as Administrator.
+            if ($Action -eq "start" -and $code -eq 0) { Open-SetuoraBrowser }
+            return $code
+        }
     }
     switch ($Action) {
         "help" { Show-SetuoraHelp; return 0 }
         "uninstall" {
+            $installed = Get-SetuoraInstalledRoot
+            if ($installed -ne $ApplicationRoot) {
+                if (-not $installed) { Write-Host "$ProductName is not installed; nothing to remove." }
+                $code = if ($installed) { Invoke-SetuoraInstalledControls $installed "uninstall" } else { 0 }
+                if ($code -eq 0) { $script:Uninstalled = $true }
+                return $code
+            }
             $scriptPath = Join-Path $ApplicationRoot 'scripts\windows\uninstall.ps1'
             if (-not (Test-Path -LiteralPath $scriptPath)) { throw 'The removal script is missing. Update this installation before removing it.' }
             Set-Location -LiteralPath $env:ProgramData
@@ -560,20 +675,17 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
             if ($code -eq 0) { $script:Uninstalled = $true }
             return $code
         }
-        "setup" {
-            $code = Invoke-SetuoraDeployment "setup" $ExtraArguments
-            if ($code -ne 0) { return $code }
-            Initialize-SetuoraTailnet
-            Initialize-SetuoraPrivateWeb
-            Test-SetuoraTailnetReady
-            return 0
-        }
+        "setup" { return Invoke-SetuoraSetup }
         "start" {
-            $code = Invoke-SetuoraDeployment "start" $ExtraArguments
-            if ($code -ne 0) { return $code }
-            Initialize-SetuoraPrivateWeb
-            Test-SetuoraTailnetReady
-            return 0
+            $code = Invoke-SetuoraStart
+            if ($code -eq 0 -and -not $Elevated) { Open-SetuoraBrowser }
+            return $code
+        }
+        "stop" {
+            $installed = Get-SetuoraInstalledRoot
+            if ($installed -eq $ApplicationRoot) { return Invoke-SetuoraStop }
+            if (-not $installed) { Write-Host "$ProductName is not installed; nothing to stop."; return 0 }
+            return Invoke-SetuoraInstalledControls $installed "stop"
         }
         "status" {
             $code = Invoke-SetuoraDeployment "status" $ExtraArguments
@@ -589,7 +701,7 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
             return 0
         }
         "update" {
-            if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) { return Update-SetuoraSource }
+            if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) { return Invoke-SetuoraStart }
             return Install-SetuoraUpdate
         }
         "update-runtime" {
@@ -606,44 +718,23 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
 
 function Show-SetuoraMenu {
     while ($true) {
-        Clear-Host
         Write-Host ""
-        Write-Host "  $ProductName" -ForegroundColor Cyan
-        Write-Host "  $ApplicationRoot"
-        Write-Host ""
-        Write-Host "  [1] Open in browser"
-        Write-Host "  [2] Start"
-        Write-Host "  [3] Stop"
-        Write-Host "  [4] Check status"
-        Write-Host "  [5] Setup / repair"
-        if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) {
-            Write-Host "  [6] Update from Git"
-        } else {
-            Write-Host "  [6] Install downloaded update"
-        }
-        Write-Host "  [7] View recent logs"
-        Write-Host "  [8] Check configuration"
-        Write-Host "  [9] Remove this installation (preserve recovery backup)"
-        Write-Host "  [0] Exit"
-        Write-Host ""
-        Write-Host "  Closing this menu leaves Setuora running."
-        $selection = Read-Host "Choose an option (0-9)"
+        Write-Host "$ProductName controls" -ForegroundColor Cyan
+        Write-Host "$ApplicationRoot"
+        Write-Host "[1] Start"
+        Write-Host "[2] Stop"
+        Write-Host "[3] Uninstall (keeps a recovery backup)"
+        $selection = Read-Host "Choose (close this window to exit)"
         $action = switch ($selection) {
-            "1" { "open" }; "2" { "start" }; "3" { "stop" }; "4" { "status" }
-            "5" { "setup" }; "6" { "update" }; "7" { "logs" }; "8" { "preflight" }; "9" { "uninstall" }
-            "0" { return 0 }
-            default { "" }
+            "1" { "start" }; "2" { "stop" }; "3" { "uninstall" }; default { "" }
         }
-        if (-not $action) {
-            Write-Host "Choose a number from 0 to 9." -ForegroundColor Yellow
-        } else {
-            try {
-                $code = Invoke-SetuoraCommand $action
-                if ($action -eq 'uninstall' -and $code -eq 0) { return 0 }
-                if ($code -ne 0) { Write-Host "The action did not complete (exit $code). Review the message above; use View recent logs for server errors." -ForegroundColor Yellow }
-            } catch {
-                Write-Host $_.Exception.Message -ForegroundColor Red
-            }
+        if (-not $action) { Write-Host "Choose a listed number." -ForegroundColor Yellow; continue }
+        try {
+            $code = Invoke-SetuoraCommand $action
+            if ($action -eq 'uninstall' -and $code -eq 0) { return 0 }
+            if ($code -ne 0) { Write-Host "The action did not complete (exit $code). Review the message above; server errors are in $ApplicationRoot\logs." -ForegroundColor Yellow }
+        } catch {
+            Write-Host $_.Exception.Message -ForegroundColor Red
         }
         $null = Read-Host "Press Enter to return to the menu"
     }

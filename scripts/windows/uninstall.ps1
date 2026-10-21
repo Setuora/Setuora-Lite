@@ -158,7 +158,7 @@ try {
     $finisher = Join-Path $PSScriptRoot 'finish-uninstall.ps1'
     if (-not $python -or -not (Test-Path -LiteralPath $deploy) -or
         -not (Test-Path -LiteralPath $preparer) -or -not (Test-Path -LiteralPath $finisher)) {
-        throw 'Python or the installed controls are missing. Run Setup / repair, then retry removal so a verified backup can be kept.'
+        throw 'Python or the installed controls are missing. Choose Start to repair them, then retry removal so a verified backup can be kept.'
     }
 
     Write-Host "Stopping Setuora $Product..."
@@ -228,18 +228,15 @@ try {
                 $oldPreference = $ErrorActionPreference
                 try {
                     $ErrorActionPreference = 'Continue'
-                    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $controller start
+                    # Setup restarts the installed code without pulling updates.
+                    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $controller setup
                     $restored = $LASTEXITCODE -eq 0
-                    if (-not $restored) {
-                        & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $controller setup
-                        $restored = $LASTEXITCODE -eq 0
-                    }
                 } finally { $ErrorActionPreference = $oldPreference }
                 if (-not $restored) {
-                    Write-Host 'Automatic restart failed. Open setuora.bat and choose Setup / repair.' -ForegroundColor Yellow
+                    Write-Host 'Automatic restart failed. Open setuora.bat and choose Start.' -ForegroundColor Yellow
                 }
             } catch {
-                Write-Host 'Automatic restart failed. Open setuora.bat and choose Setup / repair.' -ForegroundColor Yellow
+                Write-Host 'Automatic restart failed. Open setuora.bat and choose Start.' -ForegroundColor Yellow
             }
         }
     }

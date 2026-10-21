@@ -25,7 +25,7 @@ The former SFTP debtor/creditor exchange assumed Tally at each franchise. Its im
 
 ## Setup
 
-1. Double-click `install-lite.bat` on a Windows 10/11 x64 franchise computer and approve the Administrator prompt. It downloads the latest Lite code, installs Git, Python, Caddy, and Tailscale as needed, configures startup tasks, and shows Lite's private HTTPS address. Sign in to the same Tailscale network as Master when prompted. Lite selects unused local ports if its usual ports are occupied, including by Master on the same computer.
+1. Copy this repository (a clone or the extracted `main` ZIP) to a Windows 10/11 x64 franchise computer, double-click `setuora.bat`, choose **Start**, and approve the Administrator prompt. Start downloads the latest Lite code into `C:\ProgramData\Setuora\Setuora-Lite`, installs Git, Python, Caddy, and Tailscale as needed, configures startup tasks, and shows Lite's private HTTPS address. Sign in to the same Tailscale network as Master when prompted. Lite selects unused local ports if its usual ports are occupied, including by Master on the same computer.
 2. Join each staff PC to that tailnet and open Lite's `https://<lite-name>.<tailnet>.ts.net` address. Browser camera scanning requires this HTTPS address.
 3. On Master, open **Franchises** (`/franchises`), save Master's private HTTPS address, and add a unique permanent franchise code. Copy that franchise's connection details securely to Lite.
 4. In Lite, open **Admin → Master connection** (`/master-connection`), paste the copied JSON, and select **Connect to Master**. Verify the inventory baseline reached Master before staff begin work. Tally runs only at Master.
@@ -34,7 +34,9 @@ The Lite app and Caddy listen on localhost. Tailscale Serve provides private HTT
 
 ## Windows installation
 
-The preferred handoff is the single `install-lite.bat` file. Running it again fetches a fast-forward update, creates a verified SQLite backup, and repairs the runtime without removing `.env`, the database, backups, or connection settings. The source checkout lives in `C:\ProgramData\Setuora\Setuora-Lite`.
+The preferred handoff is this repository with its single `setuora.bat`. Choosing **Start** again fetches a fast-forward update, creates a verified SQLite backup, and repairs the runtime without removing `.env`, the database, backups, or connection settings. The installed checkout lives in `C:\ProgramData\Setuora\Setuora-Lite`.
+
+Double-click `setuora.bat` for the controls menu: **Start**, **Stop** and **Uninstall**. Run from a downloaded or cloned folder, they act on the installation in `C:\ProgramData\Setuora\Setuora-Lite`. Start installs, repairs or updates Lite, verifies the app, Caddy and the private Serve route, and opens the private HTTPS address. A clean checkout is fast-forwarded first, after a verified SQLite backup, when its upstream is reachable; otherwise Start warns and runs the current commit. Stop removes Lite's Serve route and disables the Lite and Caddy startup tasks, so Lite stays stopped after a restart until you choose Start. Uninstall keeps a verified recovery bundle before removing the application. The `status`, `open`, `logs` and `preflight` commands remain available as `setuora.bat <command>`.
 
 For a fixed-version release handoff, build the self-extracting Windows installer:
 

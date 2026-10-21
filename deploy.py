@@ -520,9 +520,9 @@ def _public_web_port() -> int:
     try:
         port = json.loads(RUNTIME_PORTS_PATH.read_text(encoding="utf-8"))["web_port"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise DeploymentError("The saved Lite port is unreadable. Run Setup / repair.") from exc
+        raise DeploymentError("The saved Lite port is unreadable. Choose Start.") from exc
     if type(port) is not int or not 1024 <= port <= 65535:
-        raise DeploymentError("The saved Lite port is invalid. Run Setup / repair.")
+        raise DeploymentError("The saved Lite port is invalid. Choose Start.")
     return port
 
 
@@ -569,7 +569,15 @@ def setup(_args: argparse.Namespace) -> None:
     _remove_legacy_lan_firewall()
     _ensure_task()
     _task("/Run", "/TN", TASK_NAME)
-    _wait_for_health()
+    try:
+        _wait_for_health()
+    except (DeploymentError, subprocess.CalledProcessError, OSError):
+        # Leave a failed Start stopped instead of half running.
+        try:
+            stop(_args)
+        except (DeploymentError, subprocess.CalledProcessError, OSError) as stop_exc:
+            print(f"Cleanup: {stop_exc}")
+        raise
     _write_env({"BOOTSTRAP_ADMIN_PASSWORD": ""})
     print("Setuora Lite is healthy on Windows.")
     print("Lite listens on localhost. Tailscale Serve will provide its private HTTPS address.")
@@ -582,13 +590,15 @@ def start(_args: argparse.Namespace) -> None:
     task = _task("/Query", "/TN", TASK_NAME, check=False, capture=True)
     if task.returncode != 0:
         raise DeploymentError(
-            "The Setuora background task is missing. Choose Setup / repair first."
+            "The Setuora background task is missing. Choose Start to repair it."
         )
     # Stop this installation, then choose another port if a different process
     # has occupied its previous port since the last start.
     _task("/End", "/TN", TASK_NAME, check=False)
     _wait_for_stop(allow_foreign=True)
     _assign_free_port("SETUORA_WEB_PORT", 8000)
+    # Stop disables the boot task; re-enable it before running.
+    _task("/Change", "/TN", TASK_NAME, "/ENABLE")
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     print("Setuora Lite is running.")
@@ -596,9 +606,15 @@ def start(_args: argparse.Namespace) -> None:
 
 def stop(_args: argparse.Namespace) -> None:
     _check_windows()
+    # Disable first so the boot trigger or failure restart cannot race with
+    # Stop, and a stopped Lite stays stopped after Windows restarts.
+    _task("/Change", "/TN", TASK_NAME, "/DISABLE", check=False)
     _task("/End", "/TN", TASK_NAME, check=False)
     _wait_for_stop(allow_foreign=True)
-    print("Setuora Lite stopped. The database and Master event queue were preserved.")
+    print(
+        "Setuora Lite stopped and stays stopped until you choose Start. "
+        "The database and Master event queue were preserved."
+    )
 
 
 def status(_args: argparse.Namespace) -> None:
@@ -613,8 +629,8 @@ def status(_args: argparse.Namespace) -> None:
             payload = json.load(response)
     except (OSError, ValueError, urllib.error.URLError) as exc:
         raise DeploymentError(
-            "Setuora Lite is not responding. Choose Start, or Setup / repair for a new installation. "
-            "If Start fails, choose View recent logs."
+            "Setuora Lite is not responding. Choose Start. "
+            "If Start fails, check logs\\setuora.log."
         ) from exc
     if payload != {"status": "ok", "role": "lite"}:
         raise DeploymentError(f"Port {port} is being used by a different application.")
@@ -683,7 +699,7 @@ def trust_tailnet_host(args: argparse.Namespace) -> None:
     if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.ts\.net", host):
         raise DeploymentError("Tailscale returned an invalid .ts.net hostname.")
     if not ENV_PATH.exists():
-        raise DeploymentError(".env is missing. Run Setup / repair first.")
+        raise DeploymentError(".env is missing. Choose Start first.")
     _, values = _read_env()
     hosts = {item.strip().lower() for item in values.get("TRUSTED_HOSTS", "").split(",") if item.strip()}
     if host not in hosts:
@@ -709,7 +725,7 @@ def backup(_args: argparse.Namespace) -> None:
 def configure_caddy_port(_args: argparse.Namespace) -> None:
     _check_windows()
     if not ENV_PATH.exists():
-        raise DeploymentError("Run Setup / repair before configuring Caddy.")
+        raise DeploymentError("Choose Start before configuring Caddy.")
     app_port = _configured_port("SETUORA_WEB_PORT", 8000)
     port = _assign_free_port("SETUORA_CADDY_PORT", 8080, exclude={app_port})
     print(f"Caddy will proxy Lite on localhost:{port}.")
