@@ -280,7 +280,7 @@
                   <button
                     class="tally-check-toggle is-checked"
                     type="submit"
-                    title="Checked by {{ confirmation.confirmed_by.username }} on {{ confirmation.confirmed_at.strftime('%d %b %Y at %H:%M') }}. Click to undo."
+                    title="Checked by {{ confirmation.confirmed_by.username }} on {{ confirmation.confirmed_at|report_datetime('%d %b %Y at %H:%M') }}. Click to undo."
                     aria-label="Checked. Click to undo."
                   >
                     <span class="tally-check-toggle__box" aria-hidden="true">✓</span>

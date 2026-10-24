@@ -116,6 +116,8 @@ def create_user(
             password_hash=hash_password(password),
             role=role_value,
             active=True,
+            # The administrator chose this password, so the user replaces it on first sign-in.
+            must_change_password=True,
         )
     )
     try:

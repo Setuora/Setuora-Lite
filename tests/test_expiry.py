@@ -70,6 +70,26 @@ def test_fefo_rejects_later_expiry_manual_sale(db_session):
         assert False, "later expiry serial should be rejected while earlier stock exists"
 
 
+def test_fefo_accepts_any_unit_with_the_earliest_expiry(db_session):
+    user = User(username="sales", password_hash="x", role="sales")
+    product = _product("EXP003")
+    db_session.add_all([user, product])
+    db_session.commit()
+    first, second = generate_serials(
+        db_session,
+        product,
+        2,
+        initial_status=SerialStatus.IN_STOCK,
+        product_batch_number="B1",
+        expiry_date=date(2026, 7, 1),
+    )
+    batch = create_batch(db_session, user, BatchType.SALE, "Customer", "")
+
+    item = add_serial_to_batch(db_session, batch, user, second.serial_number)
+
+    assert item.serial_id == second.id
+
+
 def test_fefo_auto_pick_uses_nearest_expiry(db_session):
     user = User(username="sales", password_hash="x", role="sales")
     product = _product("EXP003")

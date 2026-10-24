@@ -24,7 +24,7 @@
           <td class="cell-wrap">{{ transfer.peer_code }}</td>
           <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ') }}</span></td>
           <td class="numeric">{{ transfer.items|length }}</td>
-          <td class="cell-date">{{ transfer.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ transfer.created_at|report_datetime }}</td>
           <td class="col-actions"><a class="button small" href="/transfers/{{ transfer.id }}">Open</a></td>
         </tr>
         {% else %}

@@ -24,7 +24,7 @@
     <dt>Current location</dt><dd>{{ serial.location.full_path if serial.location else (serial.warehouse or 'Unassigned') }}{% if serial.warehouse %} · {{ serial.warehouse_level }}{% endif %}</dd>
     <dt>Status</dt><dd><span class="status {{ serial.display_status|lower }}">{{ serial.display_status }}</span></dd>
     <dt>Active</dt><dd>{{ 'Yes' if serial.active else 'No' }}</dd>
-    <dt>Created</dt><dd>{{ serial.created_at.strftime('%d %b %Y %H:%M') }}</dd>
+    <dt>Created</dt><dd>{{ serial.created_at|report_datetime }}</dd>
     {% if replacement %}
     <dt>Replacement</dt><dd><a href="/serials/{{ replacement.id }}">{{ replacement.serial_number }}</a></dd>
     {% endif %}
@@ -39,7 +39,7 @@
       <tbody>
         {% for move in relocations %}
         <tr>
-          <td class="cell-date">{{ move.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ move.created_at|report_datetime }}</td>
           <td class="cell-code">{{ move.reference_number }}</td>
           <td class="cell-wrap">{{ move.previous_location_snapshot }}</td>
           <td class="cell-wrap">{{ move.new_location_snapshot }}</td>
@@ -62,7 +62,7 @@
       <tbody>
         {% for txn in transactions %}
         <tr>
-          <td class="cell-date">{{ txn.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ txn.created_at|report_datetime }}</td>
           <td>{{ txn.transaction_type }}</td>
           <td>{{ txn.status_from or '-' }} &rarr; {{ txn.status_to or '-' }}</td>
           <td>{{ txn.user.username }}</td>
@@ -91,7 +91,7 @@
       <tbody>
         {% for log in logs %}
         <tr>
-          <td class="cell-date">{{ log.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ log.created_at|report_datetime }}</td>
           <td>{{ log.action }}</td>
           <td><span class="status {{ log.status|lower }}">{{ log.status }}</span></td>
           <td>{{ log.user.username }}</td>

@@ -339,6 +339,9 @@ class Serial(Base):
         """Use the business-facing name for a QR that is not stock yet."""
         if self.status == SerialStatus.GENERATED.value:
             return "UNASSIGNED"
+        if self.status == SerialStatus.IN_TRANSIT.value and not self.active:
+            # The destination franchise received it; the source keeps it for history.
+            return "TRANSFERRED"
         return self.status
 
 

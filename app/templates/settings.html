@@ -49,7 +49,7 @@
                 <button class="button small" type="submit">Set active</button>
               </form>
               <form method="post" action="/settings/companies/{{ company.id }}/delete"
-                    onsubmit="return confirm('Delete the company profile {{ company.name }}?');">
+                    data-confirm="Delete the company profile {{ company.name }}?">
                 <button class="button small ghost" type="submit">Delete</button>
               </form>
               {% endif %}

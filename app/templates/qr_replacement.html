@@ -30,12 +30,30 @@
 <section class="panel">
   <div class="section-title"><h2>Replacement history</h2></div>
   <div class="table-scroll">
+    {% if master_qr_only %}
+    <table>
+      <thead><tr><th class="cell-date">Applied</th><th>Old serial</th><th>New serial</th><th>Product</th><th class="col-actions">Label</th></tr></thead>
+      <tbody>
+        {% for old, new in master_replacements %}
+        <tr>
+          <td class="cell-date">{{ new.created_at|report_datetime }}</td>
+          <td class="cell-code">{{ old.serial_number }}</td>
+          <td class="cell-code">{{ new.serial_number }}</td>
+          <td class="cell-wrap">{{ new.product.product_name }}</td>
+          <td class="col-actions">{% if role_can(user, 'label_files') %}<a class="button small" href="/serials/labels?ids={{ new.id }}">Print new label</a>{% else %}-{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No replacements yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
     <table>
       <thead><tr><th class="cell-date">Time</th><th>Serial</th><th>Status</th><th>Message</th><th>User</th></tr></thead>
       <tbody>
         {% for log in logs %}
         <tr>
-          <td class="cell-date">{{ log.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ log.created_at|report_datetime }}</td>
           <td class="cell-code">{{ log.serial_number_raw }}</td>
           <td><span class="status {{ log.status|lower }}">{{ log.status }}</span></td>
           <td class="cell-wrap">{{ log.message or '-' }}</td>
@@ -46,6 +64,7 @@
         {% endfor %}
       </tbody>
     </table>
+    {% endif %}
   </div>
 </section>
 {% endblock %}

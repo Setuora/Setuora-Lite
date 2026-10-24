@@ -23,7 +23,7 @@
           <td class="cell-code">{{ serial.serial_number }}</td>
           <td>{{ serial.product.product_code }} - {{ serial.product.product_name }}</td>
           <td><span class="status {{ serial.status|lower }}">{{ serial.display_status }}</span></td>
-          <td class="cell-date">{{ serial.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ serial.created_at|report_datetime }}</td>
         </tr>
         {% else %}
         <tr><td colspan="4" class="empty">No QR codes have synced yet</td></tr>
@@ -103,7 +103,7 @@
           <td class="cell-code">{{ batch.batch_number }}</td>
           <td>{{ batch.reason_code or '-' }}</td>
           <td class="numeric">{{ batch.items|length }}</td>
-          <td class="cell-date">{{ batch.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ batch.created_at|report_datetime }}</td>
           <td class="col-actions"><a href="/barcode-assignment/{{ batch.id }}">Open</a></td>
         </tr>
         {% else %}

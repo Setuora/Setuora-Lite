@@ -104,6 +104,7 @@ def test_user_creation_accepts_multiple_roles():
     assert response.headers["location"] == "/users"
     assert dual is not None
     assert dual.role == "purchase,sales"
+    assert dual.must_change_password is True
     assert "purchase, sales" in after_page.body.decode()
 
 

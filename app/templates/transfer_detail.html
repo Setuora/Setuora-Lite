@@ -31,14 +31,14 @@
       <dt>Direction</dt><dd>{{ transfer.direction }}</dd>
       <dt>Other franchise</dt><dd>{{ transfer.peer_code }}</dd>
       <dt>Created by</dt><dd>{{ transfer.created_by.username if transfer.created_by else 'Master command' }}</dd>
-      <dt>Created</dt><dd>{{ transfer.created_at.strftime('%d %b %Y %H:%M') }}</dd>
-      <dt>Dispatched</dt><dd>{{ transfer.dispatched_at.strftime('%d %b %Y %H:%M') if transfer.dispatched_at else '-' }}</dd>
-      <dt>Received</dt><dd>{{ transfer.received_at.strftime('%d %b %Y %H:%M') if transfer.received_at else '-' }}</dd>
+      <dt>Created</dt><dd>{{ transfer.created_at|report_datetime }}</dd>
+      <dt>Dispatched</dt><dd>{{ transfer.dispatched_at|report_datetime if transfer.dispatched_at else '-' }}</dd>
+      <dt>Received</dt><dd>{{ transfer.received_at|report_datetime if transfer.received_at else '-' }}</dd>
       <dt>Notes</dt><dd>{{ transfer.notes or '-' }}</dd>
     </dl>
   </article>
 
-  <article class="panel">
+  <article class="panel" id="transfer-progress" data-scan-refresh>
     <h2>{{ 'Build manifest' if is_draft else 'Receipt progress' if not is_outbound else 'Network progress' }}</h2>
     {% if is_draft %}
     <p>Scan only serials currently in stock. Dispatch changes them to <strong>IN TRANSIT</strong> in one transaction.</p>
@@ -90,7 +90,7 @@
 </section>
 {% endif %}
 
-<section class="panel">
+<section class="panel" id="transfer-manifest" data-scan-refresh>
   <div class="page-head compact">
     <div><h2>Serial manifest</h2><p>{{ transfer.items|length }} item(s)</p></div>
     <div class="actions">
@@ -133,6 +133,6 @@
 
 {% if is_draft or is_receivable %}
 <script src="/static/zxing.min.js"></script>
-<script src="/static/scanner.js?v=20260918-editorial-1"></script>
+<script src="/static/scanner.js?v=20261024-transfer-refresh-1"></script>
 {% endif %}
 {% endblock %}

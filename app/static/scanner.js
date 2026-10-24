@@ -21,6 +21,7 @@ const voucherPreviewFoot = document.getElementById("voucher-preview-foot");
 const voucherLineCount = document.getElementById("voucher-line-count");
 const scannedSerialsTable = document.getElementById("scanned-serials-table");
 const scannedSerialsBody = document.getElementById("scanned-serials-body");
+const liveRefreshSections = document.querySelectorAll("[data-scan-refresh]");
 
 const canManual = form && form.dataset.canManual === "true";
 const canEditVoucher = voucherPreviewTable?.dataset.canEdit === "true";
@@ -411,6 +412,26 @@ function updateBatchState(payload) {
   if (payload.summary) updateVoucherPreview(payload.summary);
   if (payload.items) updateScannedSerials(payload.items);
   if (payload.sale_return) updateSaleReturnState(payload.sale_return);
+}
+
+async function refreshScanSections() {
+  if (!liveRefreshSections.length) return;
+  try {
+    const response = await fetch(window.location.href, {
+      credentials: "same-origin",
+    });
+    if (!response.ok) return;
+    const page = new DOMParser().parseFromString(
+      await response.text(),
+      "text/html",
+    );
+    liveRefreshSections.forEach((section) => {
+      const fresh = page.getElementById(section.id);
+      if (fresh) section.replaceChildren(...fresh.childNodes);
+    });
+  } catch (e) {
+    // The saved scan appears after the next scan or a page reload.
+  }
 }
 
 function showScannerTools() {
@@ -922,6 +943,7 @@ async function submitSerial(serial, source = "camera") {
     if (typeof payload.item_count === "undefined") updateScanCount();
     updateBatchState(payload);
     updateShelfState(payload);
+    refreshScanSections();
     setScanStatus(
       scanning
         ? payload.shelf_required

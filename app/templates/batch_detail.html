@@ -332,7 +332,7 @@
               <button class="button small" type="submit">Set</button>
             </form>
             {% else %}
-            {{ item.rate if item.rate is not none else item.serial.product.default_rate }}
+            {{ '%.2f'|format(item.rate if item.rate is not none else item.serial.product.default_rate) }}
             {% endif %}
           </td>
           <td class="col-actions">
@@ -414,5 +414,5 @@
   })();
 </script>
 <script src="/static/zxing.min.js"></script>
-<script src="/static/scanner.js?v=20260918-editorial-1" data-batch-id="{{ batch.id }}"></script>
+<script src="/static/scanner.js?v=20261024-transfer-refresh-1" data-batch-id="{{ batch.id }}"></script>
 {% endblock %}

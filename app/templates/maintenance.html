@@ -34,7 +34,7 @@
   {% if backup_config.container_deployment %}
   <p class="muted">Scheduling and retention settings are stored in the persistent data volume. Use the reviewed host backup system to copy verified backups off-machine.</p>
   {% else %}
-  <p class="muted">Configure BACKUP_OFFSITE_DIRECTORY for a verified copy on another drive or network share. Keep a separate copy of .env.</p>
+  <p class="muted">Set an off-machine copy folder below for a verified copy on another drive or network share. Keep a separate copy of .env.</p>
   {% endif %}
 </section>
 
@@ -72,7 +72,7 @@
 <section class="panel">
   <div class="section-title"><h2>Import backup</h2></div>
   <div class="backup-import-grid">
-    <form method="post" action="/maintenance/restore-existing" class="backup-import-form" onsubmit="return confirm('Import this backup now? Current data will be replaced after a safety backup is created.');">
+    <form method="post" action="/maintenance/restore-existing" class="backup-import-form" data-confirm="Import this backup now? Current data will be replaced after a safety backup is created.">
       <h3>From backup folder</h3>
       <label>Previous backup
         <select name="selected_backup" required {{ 'disabled' if not backup_status.backup_files else '' }}>
@@ -97,7 +97,7 @@
       <button class="button danger" type="submit" {{ 'disabled' if not backup_status.backup_files else '' }}>Import selected backup</button>
     </form>
 
-    <form method="post" action="/maintenance/restore-upload" enctype="multipart/form-data" class="backup-import-form backup-import-form--upload" onsubmit="return confirm('Import this uploaded backup now? Current data will be replaced after a safety backup is created.');">
+    <form method="post" action="/maintenance/restore-upload" enctype="multipart/form-data" class="backup-import-form backup-import-form--upload" data-confirm="Import this uploaded backup now? Current data will be replaced after a safety backup is created.">
       <h3>Upload backup file</h3>
       <label>Backup file
         <input name="upload" type="file" accept=".db,application/octet-stream" required>
@@ -124,7 +124,7 @@
       <strong>Clear database and cache</strong>
       <p>This keeps your super admin account and removes users, products, serials, batches, reports, settings, logs, and cached application state.</p>
     </div>
-    <form method="post" action="/maintenance/reset" class="stack" onsubmit="return confirm('Clear and reset the database now? This cannot be undone.');">
+    <form method="post" action="/maintenance/reset" class="stack" data-confirm="Clear and reset the database now? This cannot be undone.">
       <label>Super admin password
         <span class="password-field" data-password-field>
           <input name="super_admin_password" type="password" autocomplete="current-password" required>
@@ -143,12 +143,12 @@
   <div class="section-title"><h2>Protected node recovery</h2></div>
   <p>
     Database reset and restore are disabled while this Lite server is connected
-    to the Master SFTP exchange. Restoring an older database could forget an
-    XML file that Tally already imported or acknowledged.
+    to Setuora Master. Restoring an older database could resend or lose events
+    that Master has already accepted.
   </p>
   <p class="muted">
-    Keep verified backups, then disable synchronization and preserve both the
-    database and SFTP exchange history before performing a reviewed recovery.
+    Keep verified backups, then pause synchronization and preserve the database
+    and its Master event queue before performing a reviewed recovery.
   </p>
 </section>
 {% endif %}

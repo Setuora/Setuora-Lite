@@ -21,7 +21,7 @@
   <h2>{{ connection_state }}</h2>
   {% if initialized %}
   <p><strong>{{ franchise_code }}</strong> &middot; {{ master_url }}</p>
-  {% if last_check %}<p class="muted">Last verified with Master: {{ last_check }}</p>{% endif %}
+  {% if last_check %}<p class="muted">Last verified with Master: {{ last_check|report_datetime }}</p>{% endif %}
   <p>{% if not sync_enabled %}New operations stay safely queued until you resume synchronization.{% elif oldest_unsent %}Your saved operations will be delivered in order. You can keep working while delivery is pending.{% else %}Setup is complete. New operations sync automatically while Master is reachable.{% endif %}</p>
   <form method="post" action="/master-connection/settings">
     <input type="hidden" name="franchise_code" value="{{ franchise_code }}">
@@ -51,7 +51,7 @@
   <summary>Enter connection details manually</summary>
   <form method="post" action="/master-connection/connect" class="stack" data-master-connect>
     <label>Franchise code
-      <input name="franchise_code" value="{{ '' if franchise_code == 'Not configured' else franchise_code }}" placeholder="BLR-01" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" autocomplete="off" {% if initialized %}readonly{% endif %} required>
+      <input name="franchise_code" value="{{ '' if franchise_code == 'Not configured' else franchise_code }}" placeholder="BLR-01" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,19}" autocomplete="off" {% if initialized %}readonly{% endif %} required>
     </label>
     <label>Master HTTPS URL
       <input name="master_url" type="url" value="{{ master_url }}" placeholder="https://master.example.com" autocomplete="off" {% if initialized %}readonly{% endif %} required>
@@ -112,7 +112,7 @@
           <td><span class="status {{ event.status|lower }}">{{ event.status }}</span></td>
           <td class="numeric">{{ event.attempts }}</td>
           <td class="cell-wrap">{{ event.last_error or '-' }}</td>
-          <td class="cell-date">{{ event.updated_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ event.updated_at|report_datetime }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No events have been queued yet.</td></tr>

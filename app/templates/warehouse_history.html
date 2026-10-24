@@ -23,7 +23,7 @@
       <tbody>
         {% for row in relocations %}
         <tr>
-          <td class="cell-date">{{ row.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ row.created_at|report_datetime }}</td>
           <td class="cell-code"><strong>{{ row.reference_number }}</strong></td>
           <td class="cell-wrap">{{ row.product.product_name }}<small>{{ row.product.product_code }} · {{ row.product_batch_number or 'No batch' }}</small></td>
           <td class="numeric">{{ row.quantity }}</td>

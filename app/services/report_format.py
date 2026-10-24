@@ -24,6 +24,16 @@ def report_date(value: object) -> str:
     return str(value)
 
 
+def report_datetime(value: object, fmt: str = "%d %b %Y %H:%M") -> str:
+    """Show a stored UTC timestamp in the business time zone."""
+    if isinstance(value, str):
+        parsed = _parse_date_text(value)
+        value = parsed if isinstance(parsed, datetime) else value
+    if not isinstance(value, datetime):
+        return report_date(value)
+    return _local_datetime(value).strftime(fmt)
+
+
 def batch_voucher_number(batch: Any, override: str | None = None) -> int | str:
     fallback = getattr(batch, "id", "") or ""
     return numeric_voucher_number(

@@ -14,7 +14,7 @@
 <section class="panel narrow">
   <dl class="details">
     <dt>Status</dt><dd><span class="status {{ attempt.status|lower }}">{{ attempt.status }}</span></dd>
-    <dt>Created</dt><dd>{{ attempt.created_at.strftime('%d %b %Y %H:%M') }}</dd>
+    <dt>Created</dt><dd>{{ attempt.created_at|report_datetime }}</dd>
     <dt>Error</dt><dd>{{ attempt.error or '-' }}</dd>
   </dl>
 </section>

@@ -190,7 +190,7 @@
           <tbody>
             {% for sale in sales_by_product[product.id] %}
             <tr>
-              <td class="cell-date">{{ sale.created_at.strftime('%d %b %Y %H:%M') }}</td>
+              <td class="cell-date">{{ sale.created_at|report_datetime }}</td>
               <td class="cell-code">{{ sale.serial_number or '-' }}</td>
               <td>{{ sale.user.username }}</td>
               <td class="cell-code">{{ sale.reference_number or (sale.batch.batch_number if sale.batch else '-') }}</td>
@@ -274,7 +274,7 @@
         <h3>Delete product</h3>
         <p>Products with serials or transaction history cannot be deleted.</p>
       </div>
-      <form method="post" action="/products/{{ product.id }}/delete" onsubmit="return confirm('Delete this product? Products with serials or transaction history cannot be deleted.');">
+      <form method="post" action="/products/{{ product.id }}/delete" data-confirm="Delete this product? Products with serials or transaction history cannot be deleted.">
         <button class="button danger" type="submit">Delete product</button>
       </form>
     </section>

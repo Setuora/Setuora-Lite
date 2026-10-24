@@ -13,6 +13,7 @@
 
 <section class="panel users-create-panel">
   <h2>New user</h2>
+  <p class="muted">The user chooses a new password the first time they sign in.</p>
   <form method="post" action="/users" class="grid-form compact">
     <label>Username<input name="username" minlength="1" maxlength="80" required></label>
     <label>Password
@@ -80,7 +81,7 @@
               data-user-id="{{ row.id }}"
               data-username="{{ row.username }}"
             >Reset password</button>
-            <form method="post" action="/users/{{ row.id }}/delete" onsubmit="return confirm('Delete this user? Accounts with activity history will be removed from this list but kept for old records.');">
+            <form method="post" action="/users/{{ row.id }}/delete" data-confirm="Delete this user? Accounts with activity history will be removed from this list but kept for old records.">
               <button class="button small danger" type="submit">Delete user</button>
             </form>
             {% endif %}

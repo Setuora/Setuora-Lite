@@ -313,8 +313,9 @@ def validate_fefo_scan(db: Session, batch: Batch, serial: Serial) -> str | None:
     earliest = candidates[0]
     if earliest.id == serial.id:
         return None
-    selected_key = (serial.expiry_date is None, serial.expiry_date or date.max, serial.created_at, serial.id)
-    earliest_key = (earliest.expiry_date is None, earliest.expiry_date or date.max, earliest.created_at, earliest.id)
+    # Units with the same expiry are interchangeable; only an earlier expiry blocks the scan.
+    selected_key = (serial.expiry_date is None, serial.expiry_date or date.max)
+    earliest_key = (earliest.expiry_date is None, earliest.expiry_date or date.max)
     if earliest_key < selected_key:
         expiry_text = earliest.expiry_date.strftime("%d %b %Y") if earliest.expiry_date else "no expiry date"
         return f"FEFO requires {earliest.serial_number} first; it expires on {expiry_text}"

@@ -405,14 +405,17 @@ def batch_permission_context(
         "tally_excel_export",
         {"edit", "yes"},
     )
+    # Lite hands Tally to Master, so its local Tally actions are unavailable.
+    local_tally = request_app_mode(request) != "lite"
     return {
         "can_edit_batch": can_edit,
         "can_fefo": can_fefo,
-        "can_tally_xml": can_tally_xml,
-        "can_tally_excel_export": can_tally_excel_export,
-        "can_tally_excel_import": can_fefo,
-        "can_retry_sync": role_has_access(db, user.role, "tally_sync_retry", {"edit", "yes"}),
-        "can_view_attempts": role_has_access(db, user.role, "tally_attempts"),
+        "can_tally_xml": local_tally and can_tally_xml,
+        "can_tally_excel_export": local_tally and can_tally_excel_export,
+        "can_tally_excel_import": local_tally and can_fefo,
+        "can_retry_sync": local_tally
+        and role_has_access(db, user.role, "tally_sync_retry", {"edit", "yes"}),
+        "can_view_attempts": local_tally and role_has_access(db, user.role, "tally_attempts"),
         "can_view_batch_list": role_has_access(db, user.role, "batch_list"),
     }
 

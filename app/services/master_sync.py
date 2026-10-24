@@ -556,8 +556,16 @@ def _aware_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+CREDENTIAL_REJECTED_MESSAGE = (
+    "Master did not accept this franchise's access key (HTTP 401). Ask the Master "
+    "administrator for replacement connection details, then choose Update connection details."
+)
+
+
 def _safe_error(exc: BaseException, *, api_key: str = "") -> str:
-    if isinstance(exc, HTTPError):
+    if isinstance(exc, HTTPError) and exc.code == 401:
+        message = CREDENTIAL_REJECTED_MESSAGE
+    elif isinstance(exc, HTTPError):
         message = f"Master returned HTTP {exc.code}."
     elif isinstance(exc, URLError):
         message = f"Master connection failed: {exc.reason}"
@@ -650,6 +658,8 @@ def _master_http_error_summary(
     *,
     api_key: str,
 ) -> str:
+    if status == 401:
+        return CREDENTIAL_REJECTED_MESSAGE
     summary = f"Master returned HTTP {status}."
     error = _bounded_master_error_envelope(body)
     if error is not None:

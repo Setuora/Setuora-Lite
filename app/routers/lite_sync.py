@@ -132,6 +132,9 @@ def _redacted_connection_error(exc: BaseException, *credentials: str) -> str:
 def _sync_connection(db: Session) -> tuple[int, int, bool]:
     sent = push_pending_events(db)
     commands = poll_master_commands(db)
+    if commands:
+        # Applying commands can queue completion events, such as a QR replacement.
+        sent += push_pending_events(db)
     pending = db.scalar(select(MasterOutboxEvent.id).where(MasterOutboxEvent.status != MasterOutboxStatus.SENT.value).limit(1)) is not None
     _store_connection_value(db, CONNECTION_CHECK_KEY, utc_now().isoformat(timespec="seconds"))
     _store_connection_value(db, CONNECTION_RESULT_KEY, "pending" if pending else "connected")

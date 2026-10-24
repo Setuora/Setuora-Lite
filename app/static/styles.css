@@ -3333,6 +3333,7 @@ table .status,
 }
 
 .status.received,
+.status.transferred,
 .status.sent,
 .status.applied,
 .status.approved,

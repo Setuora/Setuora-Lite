@@ -34,7 +34,7 @@
           <td class="cell-code">{{ receipt.utr_number or '-' }}</td>
           <td><span class="status {{ receipt.status|lower }}">{{ receipt.status|title }}</span><small>{{ 'Synced to Master' if receipt.synced_at else 'Waiting to sync' }}</small></td>
           <td class="cell-wrap">{% if receipt.rejection_remarks %}{{ receipt.rejection_remarks }}{% elif receipt.status == 'APPROVED' %}Approved by {{ receipt.reviewed_by or 'Master' }}{% else %}-{% endif %}</td>
-          <td class="cell-date">{{ receipt.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td class="cell-date">{{ receipt.created_at|report_datetime }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No receipts submitted yet.</td></tr>

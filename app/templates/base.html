@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#faf9f5">
   <title>{% block title %}{{ 'Setuora Lite' if app_mode == 'lite' else 'Setuora Barcode Tally Bridge' }}{% endblock %}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=20260918-editorial-1">
+  <link rel="stylesheet" href="/static/styles.css?v=20261024-transferred-1">
   <link rel="stylesheet" href="/static/design-system.css?v=20260918-editorial-1">
 </head>
 <body>
@@ -142,6 +142,7 @@
     {% block content %}{% endblock %}
   </main>
   {% include "partials/xlsx_export_dialog.html" %}
+  <script src="/static/page-actions.js?v=20261024-csp-1"></script>
   <script src="/static/table-viewport.js?v=20260918-editorial-1"></script>
   <script src="/static/searchable-select.js?v=20260711-director-picker-1"></script>
   <script src="/static/autosave.js?v=20260708-gst-choice-1"></script>
