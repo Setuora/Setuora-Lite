@@ -144,21 +144,18 @@ GST_REGISTRATION_OPTIONS = tuple(
 BATCH_LIST_SCOPES = {
     "all": {
         "title": "Batches",
-        "eyebrow": "Transactions",
         "permission": "batch_list",
         "types": None,
         "empty_message": "No batches yet",
     },
     "purchase": {
         "title": "Purchase batches",
-        "eyebrow": "Incoming stock",
         "permission": "purchase_data",
         "types": (BatchType.PURCHASE.value, BatchType.RECEIVE.value),
         "empty_message": "No purchase batches yet",
     },
     "sales": {
         "title": "Sales batches",
-        "eyebrow": "Outgoing stock",
         "permission": "sales_data",
         "types": (BatchType.SALE.value,),
         "empty_message": "No sales batches yet",
@@ -626,7 +623,6 @@ def batch_list_response(request: Request, db: Session, scope: str):
             "batches": batch_list_rows(db, config["types"]),
             "batch_scope": scope,
             "page_title": config["title"],
-            "page_eyebrow": config["eyebrow"],
             "empty_message": config["empty_message"],
         },
     )

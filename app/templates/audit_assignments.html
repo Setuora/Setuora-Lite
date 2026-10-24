@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Timed stock verification</p>
     <h1>Audit assignments</h1>
   </div>
 </section>
@@ -82,7 +81,7 @@
             {{ row.starts_local.strftime('%d %b %Y %H:%M') }}<br>
             <span class="muted">to {{ row.ends_local.strftime('%d %b %Y %H:%M') }}</span>
           </td>
-          <td><span class="status {{ row.progress.state|lower }}">{{ row.progress.state }}</span></td>
+          <td><span class="status {{ row.progress.state|lower }}">{{ row.progress.state|status_label }}</span></td>
           <td class="numeric">{{ row.progress.expected }}</td>
           <td class="numeric">{{ row.progress.verified }}</td>
           <td class="numeric">{{ row.progress.pending }}</td>

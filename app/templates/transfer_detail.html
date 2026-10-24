@@ -3,8 +3,8 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">{{ transfer.direction|title }} franchise transfer</p>
     <h1>{{ transfer.transfer_uuid[:8]|upper }}</h1>
+    <p class="page-meta">{{ transfer.direction|status_label }} franchise transfer</p>
     <p>
       {% if is_outbound %}
       {{ transfer.local_franchise_code or 'This franchise' }} → {{ transfer.peer_code }}
@@ -14,7 +14,7 @@
     </p>
   </div>
   <div class="actions">
-    <span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ') }}</span>
+    <span class="status {{ transfer.status|lower }}">{{ transfer.status|status_label }}</span>
     <a class="button" href="/transfers">All transfers</a>
   </div>
 </section>
@@ -28,7 +28,7 @@
     <h2>Manifest details</h2>
     <dl class="details">
       <dt>Full ID</dt><dd><code>{{ transfer.transfer_uuid }}</code></dd>
-      <dt>Direction</dt><dd>{{ transfer.direction }}</dd>
+      <dt>Direction</dt><dd>{{ transfer.direction|status_label }}</dd>
       <dt>Other franchise</dt><dd>{{ transfer.peer_code }}</dd>
       <dt>Created by</dt><dd>{{ transfer.created_by.username if transfer.created_by else 'Master command' }}</dd>
       <dt>Created</dt><dd>{{ transfer.created_at|report_datetime }}</dd>
@@ -133,6 +133,6 @@
 
 {% if is_draft or is_receivable %}
 <script src="/static/zxing.min.js"></script>
-<script src="/static/scanner.js?v=20261024-transfer-refresh-1"></script>
+<script src="/static/scanner.js?v=20261024-refine-1"></script>
 {% endif %}
 {% endblock %}

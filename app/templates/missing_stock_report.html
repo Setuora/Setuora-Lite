@@ -4,7 +4,6 @@
 {% set missing_excel_fields = "Audit Date|Audited By|Audit Batch|Serial|Product Code|Product Name|Product Batch|Warehouse|Storage Location|Mfg Date|Expiry Date|Expected Status" %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Audit exceptions</p>
     <h1>Missing stock report</h1>
     <p>Serial-level stock that was expected but not found during an audit.</p>
   </div>
@@ -33,7 +32,7 @@
 </section>
 
 <section class="metric-grid">
-  <div class="metric danger"><span>Missing serials</span><strong>{{ summary.total }}</strong></div>
+  <div class="metric{{ ' danger' if summary.total }}" data-tone="danger"><span>Missing serials</span><strong>{{ summary.total }}</strong></div>
   <div class="metric"><span>Affected products</span><strong>{{ summary.products }}</strong></div>
   <div class="metric"><span>Audit batches</span><strong>{{ summary.audit_batches }}</strong></div>
   <div class="metric"><span>Warehouses</span><strong>{{ summary.warehouses }}</strong></div>
@@ -92,7 +91,7 @@
             <strong>{{ report_date(serial.mfg_date) if serial and serial.mfg_date else '-' }}</strong>
             <small>Exp: {{ report_date(serial.expiry_date) if serial and serial.expiry_date else '-' }}</small>
           </td>
-          <td><span class="status missing">{{ finding.expected_status or '-' }}</span></td>
+          <td><span class="status missing">{{ (finding.expected_status or '-')|status_label }}</span></td>
         </tr>
         {% else %}
         <tr><td colspan="9" class="empty">No missing stock matches these filters.</td></tr>

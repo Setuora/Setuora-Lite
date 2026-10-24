@@ -4,7 +4,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">System</p>
     <h1>Settings</h1>
   </div>
   {% if (role_can(user, 'page_tally_check') and role_can(user, 'tally_check_edit')) or has_role(user, 'super_admin') %}

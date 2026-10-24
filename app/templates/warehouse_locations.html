@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Warehouse setup</p>
     <h1>Storage locations</h1>
   </div>
   <div class="actions">
@@ -17,8 +16,8 @@
 <section class="location-created-card">
   <img src="/warehouse/locations/{{ created_location.id }}/qr.png" alt="QR code for {{ created_location.code }}">
   <div>
-    <p class="eyebrow">Location created</p>
     <h2>{{ created_location.code }}</h2>
+    <p class="page-meta">Location created</p>
     <p>{{ created_location.full_path }}</p>
     <div class="row-actions table-actions">
       <a class="button primary" href="/warehouse/locations/labels.pdf?ids={{ created_location.id }}">Print this location label</a>
@@ -58,7 +57,7 @@
           <td class="cell-code"><strong>{{ location.code }}</strong></td>
           <td>{{ location.warehouse }}</td><td>{{ location.warehouse_level }}</td><td>{{ location.zone }}</td><td>{{ location.section }}</td>
           <td>{{ location.rack }}</td><td>{{ location.shelf }}</td><td>{{ location.bin }}</td>
-          <td><span class="status {{ 'synced' if location.active else 'failed' }}">{{ 'ACTIVE' if location.active else 'INACTIVE' }}</span></td>
+          <td><span class="status {{ 'synced' if location.active else 'inactive' }}">{{ 'Active' if location.active else 'Inactive' }}</span></td>
           <td>
             <div class="location-label-actions">
               <a class="button small" href="/warehouse/locations/labels.pdf?ids={{ location.id }}">Print</a>

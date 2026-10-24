@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Setuora Lite</p>
     <h1>Master connection</h1>
     <p>Connect this Lite server to your warehouse Master. Tally runs on Master.</p>
   </div>
@@ -95,7 +94,7 @@
 <section class="metric-grid">
   <div class="metric"><span>Pending</span><strong>{{ counts.get('PENDING', 0) }}</strong></div>
   <div class="metric"><span>Sent to Master</span><strong>{{ counts.get('SENT', 0) }}</strong></div>
-  <div class="metric warn"><span>Failed delivery</span><strong>{{ counts.get('FAILED', 0) }}</strong></div>
+  <div class="metric{{ ' warn' if counts.get('FAILED', 0) }}" data-tone="warn"><span>Failed delivery</span><strong>{{ counts.get('FAILED', 0) }}</strong></div>
   <div class="metric"><span>Master commands received</span><strong>{{ command_count }}</strong></div>
 </section>
 
@@ -108,8 +107,8 @@
         {% for event in recent_events %}
         <tr>
           <td class="numeric">{{ event.sequence }}</td>
-          <td>{{ event.event_type }}</td>
-          <td><span class="status {{ event.status|lower }}">{{ event.status }}</span></td>
+          <td>{{ event.event_type|status_label }}</td>
+          <td><span class="status {{ event.status|lower }}">{{ event.status|status_label }}</span></td>
           <td class="numeric">{{ event.attempts }}</td>
           <td class="cell-wrap">{{ event.last_error or '-' }}</td>
           <td class="cell-date">{{ event.updated_at|report_datetime }}</td>

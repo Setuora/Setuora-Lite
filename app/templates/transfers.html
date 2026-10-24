@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Stock network</p>
     <h1>Franchise transfers</h1>
     <p>Dispatch stock to another franchise or receive an incoming manifest.</p>
   </div>
@@ -20,9 +19,9 @@
         {% for transfer in transfers %}
         <tr>
           <td class="cell-code"><a href="/transfers/{{ transfer.id }}">{{ transfer.transfer_uuid[:8]|upper }}</a></td>
-          <td>{{ transfer.direction }}</td>
+          <td>{{ transfer.direction|status_label }}</td>
           <td class="cell-wrap">{{ transfer.peer_code }}</td>
-          <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ') }}</span></td>
+          <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|status_label }}</span></td>
           <td class="numeric">{{ transfer.items|length }}</td>
           <td class="cell-date">{{ transfer.created_at|report_datetime }}</td>
           <td class="col-actions"><a class="button small" href="/transfers/{{ transfer.id }}">Open</a></td>

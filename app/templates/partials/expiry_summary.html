@@ -10,9 +10,9 @@
   </div>
 
   <section class="metric-grid expiry-metric-grid">
-    <div class="metric danger"><span>Products expiring in 30 days</span><strong>{{ expiry.widgets.expiring_30 }}</strong></div>
-    <div class="metric warn"><span>Products expiring in 60 days</span><strong>{{ expiry.widgets.expiring_60 }}</strong></div>
-    <div class="metric danger"><span>High expiry risk</span><strong>{{ expiry.widgets.high_risk }}</strong></div>
+    <div class="metric{{ ' danger' if expiry.widgets.expiring_30 }}" data-tone="danger"><span>Products expiring in 30 days</span><strong>{{ expiry.widgets.expiring_30 }}</strong></div>
+    <div class="metric{{ ' warn' if expiry.widgets.expiring_60 }}" data-tone="warn"><span>Products expiring in 60 days</span><strong>{{ expiry.widgets.expiring_60 }}</strong></div>
+    <div class="metric{{ ' danger' if expiry.widgets.high_risk }}" data-tone="danger"><span>High expiry risk</span><strong>{{ expiry.widgets.high_risk }}</strong></div>
     <div class="metric"><span>Dead stock value</span><strong>Rs {{ '%.0f'|format(expiry.widgets.dead_stock_value) }}</strong></div>
     <div class="metric"><span>Slow-moving value</span><strong>Rs {{ '%.0f'|format(expiry.widgets.slow_stock_value) }}</strong></div>
     <div class="metric"><span>Batch-wise stock</span><strong>{{ expiry.widgets.batch_wise_stock }}</strong></div>

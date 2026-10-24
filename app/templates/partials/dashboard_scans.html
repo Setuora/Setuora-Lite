@@ -1,8 +1,8 @@
 {% for scan in recent_scans %}
 <tr>
   <td class="cell-code">{{ scan.serial_number_raw }}</td>
-  <td>{{ scan.action }}</td>
-  <td><span class="status {{ scan.status|lower }}">{{ scan.status }}</span></td>
+  <td>{{ scan.action|status_label }}</td>
+  <td><span class="status {{ scan.status|lower }}">{{ scan.status|status_label }}</span></td>
 </tr>
 {% else %}
 <tr><td colspan="3" class="empty">No scans yet. Scanned serials will appear here.</td></tr>

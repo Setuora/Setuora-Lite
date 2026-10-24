@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Serial history</p>
     <h1>{{ serial.serial_number }}</h1>
   </div>
   <div class="actions">
@@ -22,7 +21,7 @@
     <dt>Mfg date</dt><dd>{{ serial.mfg_date.strftime('%d %b %Y') if serial.mfg_date else '-' }}</dd>
     <dt>Expiry date</dt><dd>{{ serial.expiry_date.strftime('%d %b %Y') if serial.expiry_date else '-' }}</dd>
     <dt>Current location</dt><dd>{{ serial.location.full_path if serial.location else (serial.warehouse or 'Unassigned') }}{% if serial.warehouse %} · {{ serial.warehouse_level }}{% endif %}</dd>
-    <dt>Status</dt><dd><span class="status {{ serial.display_status|lower }}">{{ serial.display_status }}</span></dd>
+    <dt>Status</dt><dd><span class="status {{ serial.display_status|lower }}">{{ serial.display_status|status_label }}</span></dd>
     <dt>Active</dt><dd>{{ 'Yes' if serial.active else 'No' }}</dd>
     <dt>Created</dt><dd>{{ serial.created_at|report_datetime }}</dd>
     {% if replacement %}
@@ -63,8 +62,8 @@
         {% for txn in transactions %}
         <tr>
           <td class="cell-date">{{ txn.created_at|report_datetime }}</td>
-          <td>{{ txn.transaction_type }}</td>
-          <td>{{ txn.status_from or '-' }} &rarr; {{ txn.status_to or '-' }}</td>
+          <td>{{ txn.transaction_type|status_label }}</td>
+          <td class="cell-transition">{{ (txn.status_from or '-')|status_label }} &rarr; {{ (txn.status_to or '-')|status_label }}</td>
           <td>{{ txn.user.username }}</td>
           <td>{{ invoice_created_by(txn) or '-' }}</td>
           <td>{{ barcode_sold_by(txn) or '-' }}</td>
@@ -92,8 +91,8 @@
         {% for log in logs %}
         <tr>
           <td class="cell-date">{{ log.created_at|report_datetime }}</td>
-          <td>{{ log.action }}</td>
-          <td><span class="status {{ log.status|lower }}">{{ log.status }}</span></td>
+          <td>{{ log.action|status_label }}</td>
+          <td><span class="status {{ log.status|lower }}">{{ log.status|status_label }}</span></td>
           <td>{{ log.user.username }}</td>
           <td class="cell-wrap">{{ log.message or '-' }}</td>
         </tr>

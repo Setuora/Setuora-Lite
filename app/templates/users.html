@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Access</p>
     <h1>Users</h1>
   </div>
 </section>
@@ -48,11 +47,11 @@
         {% for row in users %}
         <tr>
           <td class="cell-wrap">{{ row.username }}</td>
-          <td class="cell-wrap">{{ row.role_label }}</td>
+          <td class="cell-wrap">{{ row.role_label.split(', ')|map('status_label')|join(', ') }}</td>
           {% if app_mode != 'lite' %}
           <td><span class="tally-access-summary">{{ user_access[row.id].summary }}</span></td>
           {% endif %}
-          <td><span class="status {{ 'synced' if row.active else 'failed' }}">{{ 'ACTIVE' if row.active else 'DISABLED' }}</span></td>
+          <td><span class="status {{ 'synced' if row.active else 'inactive' }}">{{ 'Active' if row.active else 'Disabled' }}</span></td>
           <td class="col-actions">
             <div class="user-actions table-actions">
             {% if app_mode != 'lite' and not has_role(row, 'super_admin') %}

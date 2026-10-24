@@ -105,7 +105,7 @@ def test_user_creation_accepts_multiple_roles():
     assert dual is not None
     assert dual.role == "purchase,sales"
     assert dual.must_change_password is True
-    assert "purchase, sales" in after_page.body.decode()
+    assert "Purchase, Sales" in after_page.body.decode()
 
 
 def test_user_delete_is_super_admin_only_and_archives_history_user():

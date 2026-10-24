@@ -3,8 +3,8 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">{{ 'Master sync' if master_qr_only else 'Existing stock' }}</p>
     <h1>{{ 'QR Inventory' if master_qr_only else 'Barcode Assignment' }}</h1>
+    <p class="page-meta">{{ 'Master sync' if master_qr_only else 'Existing stock' }}</p>
   </div>
 </section>
 
@@ -22,7 +22,7 @@
         <tr>
           <td class="cell-code">{{ serial.serial_number }}</td>
           <td>{{ serial.product.product_code }} - {{ serial.product.product_name }}</td>
-          <td><span class="status {{ serial.status|lower }}">{{ serial.display_status }}</span></td>
+          <td><span class="status {{ serial.status|lower }}">{{ serial.display_status|status_label }}</span></td>
           <td class="cell-date">{{ serial.created_at|report_datetime }}</td>
         </tr>
         {% else %}

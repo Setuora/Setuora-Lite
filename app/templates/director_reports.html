@@ -4,8 +4,8 @@
 {% set audit_excel_fields = "Audit Date|Audit Batch|Audited By|Products|Verified|Missing|Extra|Total|Pending|Product Code|Product Name|Audit Batches|Finding|Serial|Expected Status|Scanned Status" %}
 <section class="page-head director-head">
   <div>
-    <p class="eyebrow">Reports only</p>
     <h1>Directors Report</h1>
+    <p class="page-meta">Reports only</p>
   </div>
   <div class="actions">
     <a class="button" href="{{ audit_reconciliation_export_url }}" data-xlsx-export data-xlsx-title="Customize audit reconciliation" data-xlsx-parameters="start|end" data-xlsx-fields="{{ audit_excel_fields }}">Audit reconciliation Excel</a>
@@ -18,8 +18,8 @@
   <section class="panel director-panel director-live-products" id="products">
     <div class="section-title">
       <div>
-        <p class="eyebrow">Live data</p>
         <h2>Product stock</h2>
+        <span class="live-indicator">Live data</span>
       </div>
       <div class="director-live-tools">
         <span>Current stock and cumulative purchase/sale totals</span>
@@ -51,8 +51,8 @@
   <aside class="panel director-panel director-warehouse-panel" id="warehouse-totals">
     <div class="section-title">
       <div>
-        <p class="eyebrow">Live data</p>
         <h2>Warehouse level totals</h2>
+        <span class="live-indicator">Live data</span>
       </div>
       <div class="director-live-tools">
         <span>Current stock, location coverage, and expiry risk by warehouse level</span>
@@ -85,19 +85,19 @@
     <span>Audit batches</span>
     <strong data-director-metric="audit_batch_count">{{ report.audit_batch_count }}</strong>
   </a>
-  <a class="metric director-metric-link danger" href="{{ latest_url }}" data-director-latest-audit-link>
+  <a class="metric director-metric-link{{ ' danger' if report.latest_missing }}" data-tone="danger" href="{{ latest_url }}" data-director-latest-audit-link>
     <span>Missing in last audit</span>
     <strong data-director-metric="latest_missing">{{ report.latest_missing }}</strong>
   </a>
-  <a class="metric director-metric-link warn" href="{{ latest_url }}" data-director-latest-audit-link>
+  <a class="metric director-metric-link{{ ' warn' if report.latest_extra }}" data-tone="warn" href="{{ latest_url }}" data-director-latest-audit-link>
     <span>Extra in last audit</span>
     <strong data-director-metric="latest_extra">{{ report.latest_extra }}</strong>
   </a>
-  <a class="metric director-metric-link danger" href="#expiry-risk">
+  <a class="metric director-metric-link{{ ' danger' if report.expiry.widgets.high_risk }}" data-tone="danger" href="#expiry-risk">
     <span>Expiry risk</span>
     <strong data-director-metric="expiry_risk">{{ report.expiry.widgets.high_risk }}</strong>
   </a>
-  <a class="metric director-metric-link danger" href="#dead-stock">
+  <a class="metric director-metric-link{{ ' danger' if report.dead_stock_rows|length }}" data-tone="danger" href="#dead-stock">
     <span>Dead stock</span>
     <strong data-director-metric="dead_stock">{{ report.dead_stock_rows|length }}</strong>
   </a>
@@ -137,8 +137,8 @@
   <section class="metric-grid director-detail-grid director-reconciliation__metrics">
     <div class="metric director-reconciliation__metric"><span>Verified</span><strong data-director-reconciliation-metric="verified">{{ report.reconciliation.verified }}</strong></div>
     <div class="metric director-reconciliation__metric"><span>Pending</span><strong data-director-reconciliation-metric="pending">{{ report.reconciliation.pending }}</strong></div>
-    <div class="metric danger director-reconciliation__metric"><span>Missing</span><strong data-director-reconciliation-metric="missing">{{ report.reconciliation.missing }}</strong></div>
-    <div class="metric warn director-reconciliation__metric"><span>Extra</span><strong data-director-reconciliation-metric="extra">{{ report.reconciliation.extra }}</strong></div>
+    <div class="metric director-reconciliation__metric{{ ' danger' if report.reconciliation.missing }}" data-tone="danger"><span>Missing</span><strong data-director-reconciliation-metric="missing">{{ report.reconciliation.missing }}</strong></div>
+    <div class="metric director-reconciliation__metric{{ ' warn' if report.reconciliation.extra }}" data-tone="warn"><span>Extra</span><strong data-director-reconciliation-metric="extra">{{ report.reconciliation.extra }}</strong></div>
     <div class="metric director-reconciliation__metric"><span>Total checked</span><strong data-director-reconciliation-metric="total">{{ report.reconciliation.total }}</strong></div>
   </section>
 </section>
@@ -201,5 +201,5 @@
 </section>
 
 <script src="/static/director-report-filters.js?v=20260712-product-stock-1"></script>
-<script src="/static/live.js?v=20260712-product-stock-1"></script>
+<script src="/static/live.js?v=20261024-refine-1"></script>
 {% endblock %}

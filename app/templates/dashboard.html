@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Today</p>
     <h1>Operations</h1>
   </div>
   <div class="actions quick-actions">
@@ -23,9 +22,9 @@
   <div class="metric"><span>In stock</span><strong data-metric="in_stock">{{ counts.in_stock }}</strong></div>
   <div class="metric"><span>Sold</span><strong data-metric="sold">{{ counts.sold }}</strong></div>
   <div class="metric"><span>Today scans</span><strong data-metric="today_scans">{{ counts.today_scans }}</strong></div>
-  <div class="metric warn"><span>{{ 'Pending Master' if app_mode == 'lite' else 'Pending sync' }}</span><strong data-metric="pending_sync">{{ counts.pending_sync }}</strong></div>
-  <div class="metric danger"><span>{{ 'Failed Master' if app_mode == 'lite' else 'Failed sync' }}</span><strong data-metric="failed">{{ counts.failed }}</strong></div>
-  <div class="metric warn"><span>Shelf verification</span><strong data-metric="shelf_verification_pending">{{ counts.shelf_verification_pending }}</strong></div>
+  <div class="metric{{ ' warn' if counts.pending_sync }}" data-tone="warn"><span>{{ 'Pending Master' if app_mode == 'lite' else 'Pending sync' }}</span><strong data-metric="pending_sync">{{ counts.pending_sync }}</strong></div>
+  <div class="metric{{ ' danger' if counts.failed }}" data-tone="danger"><span>{{ 'Failed Master' if app_mode == 'lite' else 'Failed sync' }}</span><strong data-metric="failed">{{ counts.failed }}</strong></div>
+  <div class="metric{{ ' warn' if counts.shelf_verification_pending }}" data-tone="warn"><span>Shelf verification</span><strong data-metric="shelf_verification_pending">{{ counts.shelf_verification_pending }}</strong></div>
   <div class="metric"><span>Total serials</span><strong data-metric="serials">{{ counts.serials }}</strong></div>
 </section>
 
@@ -33,7 +32,6 @@
 <section class="panel director-panel dashboard-product-stock" id="product-stock">
   <div class="section-title">
     <div>
-      <p class="eyebrow">Inventory overview</p>
       <h2>Product stock</h2>
     </div>
     <div class="director-live-tools">
@@ -102,5 +100,5 @@
   </div>
 </section>
 <script src="/static/director-report-filters.js?v=20260712-product-stock-1"></script>
-<script src="/static/live.js?v=20260712-product-stock-1"></script>
+<script src="/static/live.js?v=20261024-refine-1"></script>
 {% endblock %}

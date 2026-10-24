@@ -7,6 +7,15 @@
     ? configuredInterval
     : 20000;
 
+  // A metric keeps its warn/danger tone only while its value needs attention.
+  function setMetricValue(element, value) {
+    element.textContent = value;
+    const metric = element.closest("[data-tone]");
+    if (metric) {
+      metric.classList.toggle(metric.getAttribute("data-tone"), String(value).trim() !== "0");
+    }
+  }
+
   function replaceHtml(selector, html) {
     if (typeof html !== "string") return;
     const element = document.querySelector(selector);
@@ -17,7 +26,7 @@
     if (data.director_metrics) {
       Object.keys(data.director_metrics).forEach(function (key) {
         const element = document.querySelector('[data-director-metric="' + key + '"]');
-        if (element) element.textContent = data.director_metrics[key];
+        if (element) setMetricValue(element, data.director_metrics[key]);
       });
     }
     if (typeof data.latest_audit_url === "string") {
@@ -35,7 +44,7 @@
         const element = document.querySelector(
           '[data-director-reconciliation-metric="' + key + '"]'
         );
-        if (element) element.textContent = data.reconciliation[key];
+        if (element) setMetricValue(element, data.reconciliation[key]);
       });
     }
     replaceHtml("[data-director-live-product-rows]", data.product_rows_html);
@@ -50,7 +59,7 @@
     if (data.counts) {
       Object.keys(data.counts).forEach(function (key) {
         const el = document.querySelector('[data-metric="' + key + '"]');
-        if (el) el.textContent = data.counts[key];
+        if (el) setMetricValue(el, data.counts[key]);
       });
     }
     if (typeof data.charts_html === "string") {

@@ -48,8 +48,7 @@
 {% set gst_number_visible = selected_gst_registration in ['Composition', 'Regular'] %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">{{ batch_type.value }}</p>
-    <h1>New batch</h1>
+    <h1>New {{ batch_type.value|status_label|lower }} batch</h1>
   </div>
 </section>
 

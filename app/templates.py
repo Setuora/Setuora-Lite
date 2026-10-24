@@ -5,13 +5,14 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.models import has_any_role
 from app.services.access_control import configured_role_has_access, landing_path_for, role_has_access
-from app.services.report_format import batch_voucher_number, report_date, report_datetime
+from app.services.report_format import batch_voucher_number, report_date, report_datetime, status_label
 
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["batch_voucher_number"] = batch_voucher_number
 templates.env.globals["report_date"] = report_date
 templates.env.filters["report_date"] = report_date
 templates.env.filters["report_datetime"] = report_datetime
+templates.env.filters["status_label"] = status_label
 
 
 def csp_nonce(request=None) -> str:

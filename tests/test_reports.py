@@ -468,7 +468,7 @@ def test_reports_page_includes_filterable_missing_stock():
     detail_text = detail_response.body.decode()
 
     assert response.status_code == 200
-    assert '<option value="MISSING" selected>MISSING</option>' in response_text
+    assert '<option value="MISSING" selected>Missing</option>' in response_text
     assert "<h2>Missing stock</h2>" in response_text
     assert "MISS100-000001" in response_text
     assert "28-06-2026" in response_text
@@ -1356,6 +1356,6 @@ def test_dashboard_renders_stock_and_activity_charts():
     assert response.status_code == 200
     assert "QR status mix" in response.text
     assert "Scan activity" in response.text
-    assert "In Stock" in response.text
+    assert "In stock" in response.text
     assert data_response.status_code == 200
     assert "QR status mix" in data_response.json()["charts_html"]

@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Live inventory placement</p>
     <h1>Warehouse map</h1>
   </div>
   <div class="actions">
@@ -24,7 +23,7 @@
   <article class="location-card {{ 'is-inactive' if not location.active else '' }}">
     <div class="location-card__head">
       <div><span>{{ location.warehouse }}</span><strong>{{ location.code }}</strong></div>
-      <span class="status {{ 'synced' if location.active else 'failed' }}">{{ 'ACTIVE' if location.active else 'INACTIVE' }}</span>
+      <span class="status {{ 'synced' if location.active else 'inactive' }}">{{ 'Active' if location.active else 'Inactive' }}</span>
     </div>
     <div class="location-path">
       <span>Zone <strong>{{ location.zone }}</strong></span>

@@ -337,10 +337,26 @@ function updateVoucherPreview(summary) {
   });
 }
 
+const LABEL_ACRONYMS = { qr: "QR", gst: "GST", sku: "SKU", fefo: "FEFO", hsn: "HSN", xml: "XML" };
+
+// Mirrors the status_label template filter so live rows match server-rendered rows.
+function statusLabel(status) {
+  const text = String(status || "");
+  const isEnum = text === text.toUpperCase() || /^[a-z0-9_]+$/.test(text);
+  if (!text || !isEnum || !/[a-z]/i.test(text)) return text;
+  const label = text
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .split(" ")
+    .map((word) => LABEL_ACRONYMS[word] || word)
+    .join(" ");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 function createStatusBadge(status) {
   const badge = document.createElement("span");
   badge.className = `status ${String(status || "").toLowerCase()}`;
-  badge.textContent = status || "-";
+  badge.textContent = statusLabel(status) || "-";
   return badge;
 }
 

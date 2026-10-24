@@ -4,7 +4,7 @@
   <td class="cell-code">{{ row.batch }}</td>
   <td class="numeric">{{ row.stock }}</td>
   <td class="numeric">{{ row.unsold_stock }}</td>
-  <td><span class="status {{ row.risk_class }}">{{ row.risk }}</span></td>
+  <td><span class="status {{ row.risk_class }}">{{ row.risk|status_label }}</span></td>
 </tr>
 {% else %}
 <tr><td colspan="5" class="empty">No expiry risk found</td></tr>

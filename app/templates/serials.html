@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Traceability</p>
     <h1>Serials</h1>
   </div>
   <form class="search" method="get">
@@ -29,7 +28,7 @@
           <td class="cell-wrap">{{ serial.product.product_name }}</td>
           <td class="cell-code">{{ serial.product_batch_number or '-' }}<small>{{ serial.location.full_path if serial.location else (serial.warehouse or '') }}{% if serial.warehouse %} · {{ serial.warehouse_level }}{% endif %}</small></td>
           <td class="cell-date">{{ serial.expiry_date.strftime('%d %b %Y') if serial.expiry_date else '-' }}</td>
-          <td><span class="status {{ serial.display_status|lower }}">{{ serial.display_status }}</span></td>
+          <td><span class="status {{ serial.display_status|lower }}">{{ serial.display_status|status_label }}</span></td>
           <td class="col-actions">{% if role_can(user, 'label_files') %}<a href="/serials/labels?ids={{ serial.id }}">Label</a>{% else %}-{% endif %}</td>
         </tr>
         {% else %}

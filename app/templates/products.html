@@ -6,7 +6,6 @@
 
 <section class="page-head">
   <div>
-    <p class="eyebrow">Master data</p>
     <h1>Products</h1>
   </div>
   <div class="actions product-page-actions">
@@ -65,7 +64,7 @@
           <td data-product-row-hsn="{{ product.id }}" class="cell-code">{{ product.hsn }}</td>
           <td data-product-row-gst="{{ product.id }}" class="numeric">{{ product.gst_rate }}%</td>
           <td>
-            <span class="status active" data-product-row-shelf="{{ product.id }}">Every {{ product.shelf_verification_interval or 1 }} scans</span>
+            <span class="status active" data-product-row-shelf="{{ product.id }}">{{ 'Every scan' if (product.shelf_verification_interval or 1) == 1 else 'Every ' ~ product.shelf_verification_interval ~ ' scans' }}</span>
           </td>
           <td>
             <span
@@ -102,7 +101,6 @@
 <dialog id="new-product-modal" class="modal product-modal">
   <div class="modal__head">
     <div>
-      <p class="eyebrow">Master data</p>
       <h2>New product</h2>
     </div>
     <button class="button ghost modal__close" type="button" data-product-close aria-label="Close">&times;</button>
@@ -146,8 +144,8 @@
 <dialog id="product-report-modal-{{ product.id }}" class="modal product-modal product-report-modal">
   <div class="modal__head">
     <div>
-      <p class="eyebrow">{{ product.product_code }}</p>
       <h2>Product report</h2>
+      <p class="page-meta">{{ product.product_code }}</p>
       <p>{{ product.product_name }} · Last {{ analysis_days }} days</p>
     </div>
     <button class="button ghost modal__close" type="button" data-product-close aria-label="Close">&times;</button>
@@ -209,8 +207,8 @@
 <dialog id="product-modal-{{ product.id }}" class="modal product-modal">
   <div class="modal__head">
     <div>
-      <p class="eyebrow">{{ product.product_code }}</p>
       <h2>{{ product.product_name }}</h2>
+      <p class="page-meta">{{ product.product_code }}</p>
     </div>
     <button class="button ghost modal__close" type="button" data-product-close aria-label="Close">&times;</button>
   </div>
@@ -224,7 +222,7 @@
       <div><span>Alt Tally item</span><strong data-product-summary-alt-tally="{{ product.id }}">{{ product.alternate_tally_stock_item_name or '-' }}</strong></div>
       <div>
         <span>Shelf check</span>
-        <strong data-product-summary-shelf="{{ product.id }}">Every {{ product.shelf_verification_interval or 1 }} scans</strong>
+        <strong data-product-summary-shelf="{{ product.id }}">{{ 'Every scan' if (product.shelf_verification_interval or 1) == 1 else 'Every ' ~ product.shelf_verification_interval ~ ' scans' }}</strong>
       </div>
       <div>
         <span>Purchase QR</span>
@@ -332,7 +330,8 @@
           if (!response.ok || !payload.ok) throw new Error(payload.error || "Save failed");
 
           const saved = payload.product;
-          const intervalText = `Every ${saved.shelf_verification_interval} scans`;
+          const interval = Number(saved.shelf_verification_interval) || 1;
+          const intervalText = interval === 1 ? "Every scan" : `Every ${interval} scans`;
           const gstText = `${saved.gst_rate}%`;
           const summaryShelf = document.querySelector(`[data-product-summary-shelf="${productId}"]`);
           const summaryHsn = document.querySelector(`[data-product-summary-hsn="${productId}"]`);

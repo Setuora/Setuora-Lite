@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Labels</p>
     <h1>Barcode Replacement</h1>
   </div>
   {% if replacement and role_can(user, 'label_files') %}
@@ -55,7 +54,7 @@
         <tr>
           <td class="cell-date">{{ log.created_at|report_datetime }}</td>
           <td class="cell-code">{{ log.serial_number_raw }}</td>
-          <td><span class="status {{ log.status|lower }}">{{ log.status }}</span></td>
+          <td><span class="status {{ log.status|lower }}">{{ log.status|status_label }}</span></td>
           <td class="cell-wrap">{{ log.message or '-' }}</td>
           <td>{{ log.user.username }}</td>
         </tr>

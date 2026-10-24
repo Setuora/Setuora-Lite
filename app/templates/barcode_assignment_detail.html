@@ -4,7 +4,6 @@
 {% set serial_excel_fields = "Product Code|Product Name|Tally Stock Item|Serial Number|Product Batch|Mfg Date|Expiry Date|Warehouse|Warehouse Level|Status|Created At" %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">QR assignment</p>
     <h1>{{ batch.batch_number }}</h1>
   </div>
   <div class="actions">
@@ -43,7 +42,7 @@
           <td class="cell-wrap">{{ item.serial.product.product_code }} - {{ item.serial.product.product_name }}</td>
           <td class="cell-code">{{ item.serial.product_batch_number or '-' }}<small>{{ item.serial.warehouse or '' }}{% if item.serial.warehouse %} · {{ item.serial.warehouse_level }}{% endif %}</small></td>
           <td class="cell-date">{{ item.serial.expiry_date.strftime('%d %b %Y') if item.serial.expiry_date else '-' }}</td>
-          <td><span class="status {{ item.serial.display_status|lower }}">{{ item.serial.display_status }}</span></td>
+          <td><span class="status {{ item.serial.display_status|lower }}">{{ item.serial.display_status|status_label }}</span></td>
           <td class="col-actions">{% if role_can(user, 'label_files') %}<a href="/serials/labels?ids={{ item.serial.id }}">Open</a>{% else %}-{% endif %}</td>
         </tr>
         {% else %}

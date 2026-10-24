@@ -4,7 +4,6 @@
 {% set movement_excel_fields = "Product Code|Product Name|Category|Brand|Warehouse|Franchise Level|Batch|Current Stock|Units Sold|Movement Ratio %|Average Daily Sales|Average Weekly Sales|Average Monthly Sales|Estimated Days to Sell|Estimated Months to Sell|Movement Status|Inventory Signal|Nearest Expiry|Months Remaining|Expiry Risk|Estimated Unsold|Suggested Action" %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Inventory intelligence</p>
     <h1>Stock Movement</h1>
     <p class="muted">{{ report_date(summary.start) }} to {{ report_date(summary.end) }} · {{ summary.analysis_days }} days</p>
   </div>
@@ -23,9 +22,9 @@
   <article class="metric"><span>Products</span><strong>{{ summary.total_products }}</strong></article>
   <article class="metric"><span>Current stock</span><strong>{{ summary.current_stock }}</strong></article>
   <article class="metric"><span>Units sold</span><strong>{{ summary.units_sold }}</strong></article>
-  <article class="metric warn"><span>Slow moving</span><strong>{{ summary.slow }}</strong></article>
-  <article class="metric danger"><span>Dead stock</span><strong>{{ summary.dead }}</strong></article>
-  <article class="metric danger"><span>High expiry risk</span><strong>{{ summary.expiry_risk }}</strong></article>
+  <article class="metric{{ ' warn' if summary.slow }}" data-tone="warn"><span>Slow moving</span><strong>{{ summary.slow }}</strong></article>
+  <article class="metric{{ ' danger' if summary.dead }}" data-tone="danger"><span>Dead stock</span><strong>{{ summary.dead }}</strong></article>
+  <article class="metric{{ ' danger' if summary.expiry_risk }}" data-tone="danger"><span>High expiry risk</span><strong>{{ summary.expiry_risk }}</strong></article>
 </section>
 
 <section class="panel">
@@ -157,9 +156,9 @@
             <small>{{ row.inventory_signal }}</small>
             {% endif %}
           </td>
-          <td><span class="status {{ row.movement_css }}">{{ row.movement_status }}</span></td>
+          <td><span class="status {{ row.movement_css }}">{{ row.movement_status|status_label }}</span></td>
           <td>
-            <span class="status {{ row.expiry_css }}">{{ row.expiry_risk }}</span>
+            <span class="status {{ row.expiry_css }}">{{ row.expiry_risk|status_label }}</span>
             {% if row.nearest_expiry %}
             <small>Nearest {{ report_date(row.nearest_expiry) }} · {{ row.months_remaining }} months</small>
             {% endif %}

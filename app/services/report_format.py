@@ -77,3 +77,18 @@ def _parse_date_text(value: str) -> date | datetime | None:
         return date.fromisoformat(value)
     except ValueError:
         return None
+
+
+_LABEL_ACRONYMS = {"qr": "QR", "gst": "GST", "sku": "SKU", "fefo": "FEFO", "hsn": "HSN", "xml": "XML"}
+
+
+def status_label(value: object) -> str:
+    """Show a stored enum value such as PURCHASE_RETURN as a readable label."""
+    text = str(getattr(value, "value", value) or "")
+    is_enum = text == text.upper() or re.fullmatch(r"[a-z0-9_]+", text) is not None
+    if not text or not is_enum or not any(char.isalpha() for char in text):
+        return text
+    words = text.replace("_", " ").lower().split(" ")
+    words = [_LABEL_ACRONYMS.get(word, word) for word in words]
+    label = " ".join(words)
+    return label[:1].upper() + label[1:]

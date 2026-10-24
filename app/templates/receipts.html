@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Payment proof</p>
     <h1>Receipts</h1>
     <p>Upload payment proof for approval by Setuora Master.</p>
   </div>
@@ -32,7 +31,7 @@
           <td class="cell-date">{{ receipt.receipt_date.strftime('%d %b %Y') }}</td>
           <td class="col-actions"><a class="button small" href="/receipts/{{ receipt.id }}/proof" target="_blank" rel="noopener">View image</a></td>
           <td class="cell-code">{{ receipt.utr_number or '-' }}</td>
-          <td><span class="status {{ receipt.status|lower }}">{{ receipt.status|title }}</span><small>{{ 'Synced to Master' if receipt.synced_at else 'Waiting to sync' }}</small></td>
+          <td><span class="status {{ receipt.status|lower }}">{{ receipt.status|status_label }}</span><small>{{ 'Synced to Master' if receipt.synced_at else 'Waiting to sync' }}</small></td>
           <td class="cell-wrap">{% if receipt.rejection_remarks %}{{ receipt.rejection_remarks }}{% elif receipt.status == 'APPROVED' %}Approved by {{ receipt.reviewed_by or 'Master' }}{% else %}-{% endif %}</td>
           <td class="cell-date">{{ receipt.created_at|report_datetime }}</td>
         </tr>

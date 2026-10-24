@@ -85,6 +85,8 @@
   --primary-soft: rgba(204, 120, 92, 0.12);
   --primary-softer: rgba(204, 120, 92, 0.08);
   --primary-ring: rgba(204, 120, 92, 0.15);
+  /* Deepest step of the coral that carries white text at WCAG AA (4.6:1). */
+  --primary-fill: #b9593a;
   --accent-teal: #5db8a6;
   --accent-amber: #e8a55a;
   --canvas: #faf9f5;
@@ -150,11 +152,20 @@
 
 html {
   scrollbar-gutter: stable;
+  scrollbar-color: var(--surface-cream-strong) transparent;
 }
 body {
   min-height: 100dvh;
   color: var(--body);
   line-height: 1.55;
+}
+::selection {
+  background: rgba(204, 120, 92, 0.24);
+  color: var(--ink);
+}
+input,
+textarea {
+  caret-color: var(--primary-active);
 }
 button,
 input,
@@ -184,6 +195,7 @@ h3 {
   font-family: var(--display-font);
   font-weight: 500;
   letter-spacing: -0.02em;
+  font-variant-numeric: lining-nums;
   text-wrap: balance;
   overflow-wrap: anywhere;
 }
@@ -221,12 +233,35 @@ small {
   font-size: 13px;
   line-height: 1.55;
 }
-.eyebrow {
-  margin: 0 0 var(--space-2);
+/* Context for a record (its franchise, type or route) sits under the heading. */
+.page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: var(--space-2) 0 0;
   color: var(--ink-48);
-  font-weight: 500;
-  letter-spacing: 1.5px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.page-meta .status {
+  min-height: 24px;
+}
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ok-fg);
   font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.live-indicator::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 /* A common shell, including navigation that measures its available space. */
@@ -245,7 +280,7 @@ small {
 }
 .global-nav {
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--space-6);
+  gap: var(--space-4);
   min-height: 72px;
   padding: 12px max(var(--page-gutter), calc((100% - var(--content-width)) / 2));
   border-radius: 0;
@@ -563,8 +598,13 @@ small {
 .table-actions form {
   margin: 0;
 }
+/* Row actions stay on one line; the table scrolls instead of stacking buttons. */
+.user-actions {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+}
 .details {
-  grid-template-columns: minmax(100px, 0.4fr) minmax(0, 1fr);
+  grid-template-columns: fit-content(14rem) minmax(0, 1fr);
   gap: 12px 24px;
   font-size: 14px;
 }
@@ -636,11 +676,23 @@ textarea {
   border-color: var(--hairline);
   color: var(--ink);
 }
+.button.primary,
+.global-nav .button.on-dark {
+  background: var(--primary-fill);
+  border-color: var(--primary-fill);
+  color: var(--on-primary);
+}
 .button.primary:hover,
 .button.primary:active {
   background: var(--primary-active);
   border-color: var(--primary-active);
   color: var(--on-primary);
+}
+/* Coral text on cream needs the pressed tone to stay readable. */
+.product-open-link,
+.company-name-card,
+.ledger-mapping-editor > summary {
+  color: var(--primary-active);
 }
 .button.small {
   min-height: 36px;
@@ -686,11 +738,15 @@ textarea {
   min-height: 40px;
 }
 
-/* Metrics share a baseline; semantic color stays in text rather than whole cards. */
+/* Metrics read as one cream strip divided by hairlines, not a row of separate cards.
+ * Semantic color stays in the value, and templates apply it only when the value needs attention. */
 .metric-grid {
-  gap: var(--space-3);
+  gap: 0;
   margin-bottom: var(--space-8);
   grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  border-radius: var(--r-lg);
+  background: var(--surface-card);
+  overflow: hidden;
 }
 .dashboard-metric-grid {
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -711,27 +767,50 @@ textarea {
 .metric.warn,
 .metric.danger {
   min-width: 0;
-  min-height: 120px;
+  min-height: 0;
+  justify-content: space-between;
+  gap: var(--space-2);
   align-items: flex-start;
   text-align: left;
-  padding: 20px;
-  border: 1px solid transparent;
-  background: var(--surface-card);
+  padding: 18px 20px 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: 1px 1px 0 0 rgba(20, 20, 19, 0.08);
 }
 .metric:hover {
   border-color: transparent;
 }
+a.metric {
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--dur) var(--ease);
+}
+a.metric:hover {
+  background: rgba(20, 20, 19, 0.035);
+}
+a.metric:focus-visible {
+  outline-offset: -3px;
+}
+.metric-grid > .metric {
+  min-height: 0;
+  padding: 18px 20px 20px;
+}
 .dashboard-metric-grid .metric {
-  padding: 16px;
-  min-height: 120px;
+  padding: 16px 18px 18px;
+  min-height: 0;
 }
 .metric span {
-  line-height: 1.45;
+  color: var(--ink-48);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
 }
 .metric strong,
 .dashboard-metric-grid .metric strong {
-  padding-top: 16px;
-  font-size: 30px;
+  padding-top: 0;
+  color: var(--ink);
+  font-size: 28px;
   line-height: 1.15;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -812,7 +891,8 @@ td.amount {
   font-variant-numeric: tabular-nums;
 }
 td.numeric,
-td.amount {
+td.amount,
+td.cell-transition {
   white-space: nowrap;
 }
 td.numeric input {
@@ -859,8 +939,8 @@ tfoot td,
   width: auto;
   min-width: 0;
   max-width: 100%;
-  min-height: 28px;
-  padding: 4px 10px;
+  min-height: 26px;
+  padding: 3px 10px;
   font-size: 12px;
   line-height: 1.4;
   font-weight: 500;
@@ -870,6 +950,31 @@ tfoot td,
 table .status {
   font-size: 12px;
   line-height: 1.4;
+  white-space: nowrap;
+}
+/* Completed or neutral lifecycle states are not failures. */
+.status.sold,
+.status.issued,
+.status.moved,
+.status.returned,
+.status.purchase_return,
+.status.sales_return {
+  background: var(--neutral-bg);
+  color: var(--ink-80);
+}
+.status.waiting,
+.status.offline {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+tbody td {
+  transition: background var(--dur) var(--ease);
+}
+tbody tr:hover > td {
+  background: rgba(245, 240, 232, 0.55);
+}
+tbody tr:hover > td.empty {
+  background: transparent;
 }
 .access-table .status {
   min-width: 96px;
@@ -1057,10 +1162,14 @@ dialog.modal::backdrop {
   .metric-grid.network-report-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .metric,
+  .metric-grid > .metric,
   .dashboard-metric-grid .metric {
-    padding: 16px;
-    min-height: 112px;
+    padding: 14px 16px 16px;
+    min-height: 0;
+  }
+  .metric strong,
+  .dashboard-metric-grid .metric strong {
+    font-size: 24px;
   }
   .grid-form,
   .grid-form.compact,
@@ -1093,7 +1202,7 @@ dialog.modal::backdrop {
     width: 100%;
   }
   .details {
-    grid-template-columns: minmax(85px, 0.4fr) minmax(0, 1fr);
+    grid-template-columns: fit-content(9rem) minmax(0, 1fr);
     gap: 12px;
   }
   .auth-panel {

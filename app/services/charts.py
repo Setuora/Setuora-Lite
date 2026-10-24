@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from app.services.report_format import status_label
+
 
 PALETTE = ["#cc785c", "#5db8a6", "#e8a55a", "#5db872", "#c64545", "#8e8b82", "#a9583e"]
 
 
 def chart_label(value: object) -> str:
-    label = str(value or "Unknown").replace("_", " ").strip().title()
-    return label.replace("Qr", "QR")
+    return status_label(str(value or "UNKNOWN").strip())
 
 
 def _compact_rows(rows: list[tuple[str, int]], limit: int) -> list[tuple[str, int]]:

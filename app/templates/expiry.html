@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Expiry management</p>
     <h1>Expiry Control</h1>
   </div>
   <div class="actions">
@@ -48,7 +47,7 @@
           <td class="cell-date">{{ row.expiry_date.strftime('%d %b %Y') }}<small>{{ row.months_left }} months</small></td>
           <td class="numeric">{{ row.expected_sales }}</td>
           <td class="numeric">{{ row.unsold_stock }}</td>
-          <td><span class="status {{ row.risk_class }}">{{ row.risk }}</span></td>
+          <td><span class="status {{ row.risk_class }}">{{ row.risk|status_label }}</span></td>
           <td>{{ row.risk_basis }}</td>
         </tr>
         {% else %}
@@ -71,7 +70,7 @@
             <td class="cell-wrap">{{ row.product_name }}</td>
             <td class="numeric">{{ row.stock }}</td>
             <td class="cell-date">{{ row.last_sale }}</td>
-            <td><span class="status {{ row.status_class }}">{{ row.status }}</span></td>
+            <td><span class="status {{ row.status_class }}">{{ row.status|status_label }}</span></td>
             <td>{{ row.stock_basis }}</td>
           </tr>
           {% else %}

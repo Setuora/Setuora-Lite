@@ -3,8 +3,8 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">{{ batch.batch_number }}</p>
     <h1>Sync attempt</h1>
+    <p class="page-meta">{{ batch.batch_number }}</p>
   </div>
   {% if role_can_view_batch(user, batch.batch_type) %}
   <a class="button" href="/batches/{{ batch.id }}">Back to batch</a>
@@ -13,7 +13,7 @@
 
 <section class="panel narrow">
   <dl class="details">
-    <dt>Status</dt><dd><span class="status {{ attempt.status|lower }}">{{ attempt.status }}</span></dd>
+    <dt>Status</dt><dd><span class="status {{ attempt.status|lower }}">{{ attempt.status|status_label }}</span></dd>
     <dt>Created</dt><dd>{{ attempt.created_at|report_datetime }}</dd>
     <dt>Error</dt><dd>{{ attempt.error or '-' }}</dd>
   </dl>
