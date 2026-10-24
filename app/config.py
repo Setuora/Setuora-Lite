@@ -46,7 +46,7 @@ BACKUP_RUNTIME_ENV_KEYS = {
     "AUTOMATIC_BACKUPS_ENABLED",
     "BACKUP_DIRECTORY",
     "BACKUP_OFFSITE_DIRECTORY",
-    "BACKUP_INTERVAL_HOURS",
+    "BACKUP_INTERVAL_MINUTES",
     "BACKUP_RETENTION_COUNT",
 }
 MASTER_CONNECTION_RUNTIME_ENV_KEYS = {
@@ -332,8 +332,8 @@ class Settings:
         self.automatic_backups_enabled: bool = _flag("AUTOMATIC_BACKUPS_ENABLED", "true")
         self.backup_directory: str = os.getenv("BACKUP_DIRECTORY", "./data/backups")
         self.backup_offsite_directory: str = os.getenv("BACKUP_OFFSITE_DIRECTORY", "").strip()
-        self.backup_interval_hours: int = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
-        self.backup_retention_count: int = int(os.getenv("BACKUP_RETENTION_COUNT", "14"))
+        self.backup_interval_minutes: int = int(os.getenv("BACKUP_INTERVAL_MINUTES", "30"))
+        self.backup_retention_count: int = int(os.getenv("BACKUP_RETENTION_COUNT", "2"))
         self.backup_startup_delay_seconds: int = int(
             os.getenv("BACKUP_STARTUP_DELAY_SECONDS", "60")
         )

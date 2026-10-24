@@ -157,20 +157,20 @@ def test_update_backup_settings_persists_env_and_refreshes_runtime(tmp_path, mon
     status = backup_service.update_backup_settings(
         enabled=False,
         backup_directory=str(backup_dir),
-        interval_hours="6",
+        interval_minutes="45",
         retention_count="7",
         offsite_directory=str(offsite_dir),
     )
 
     assert status.enabled is False
-    assert status.interval_hours == 6
+    assert status.interval_minutes == 45
     assert status.retention_count == 7
     assert backup_dir.exists()
     assert offsite_dir.exists()
     env_text = env_file.read_text(encoding="utf-8")
     assert "AUTOMATIC_BACKUPS_ENABLED=false" in env_text
     assert f'BACKUP_DIRECTORY="{backup_dir}"' in env_text
-    assert "BACKUP_INTERVAL_HOURS=6" in env_text
+    assert "BACKUP_INTERVAL_MINUTES=45" in env_text
     assert os.environ["BACKUP_RETENTION_COUNT"] == "7"
     assert get_settings().backup_retention_count == 7
     get_settings.cache_clear()
@@ -188,7 +188,7 @@ def test_container_backup_settings_persist_only_inside_data_volume(tmp_path, mon
         automatic_backups_enabled=True,
         backup_directory=str(backup_dir),
         backup_offsite_directory="",
-        backup_interval_hours=24,
+        backup_interval_minutes=30,
         backup_retention_count=14,
         container_deployment=True,
     )
@@ -202,20 +202,20 @@ def test_container_backup_settings_persist_only_inside_data_volume(tmp_path, mon
     backup_service.update_backup_settings(
         enabled=True,
         backup_directory=str(backup_dir),
-        interval_hours="12",
+        interval_minutes="120",
         retention_count="10",
         offsite_directory="",
     )
 
     assert backup_dir.is_dir()
     assert settings_file.is_file()
-    assert "BACKUP_INTERVAL_HOURS=12" in settings_file.read_text(encoding="utf-8")
+    assert "BACKUP_INTERVAL_MINUTES=120" in settings_file.read_text(encoding="utf-8")
 
     with pytest.raises(ValueError, match="must stay inside"):
         backup_service.update_backup_settings(
             enabled=True,
             backup_directory=str(tmp_path / "outside"),
-            interval_hours="12",
+            interval_minutes="120",
             retention_count="10",
             offsite_directory="",
         )
@@ -223,7 +223,7 @@ def test_container_backup_settings_persist_only_inside_data_volume(tmp_path, mon
         backup_service.update_backup_settings(
             enabled=True,
             backup_directory=str(backup_dir),
-            interval_hours="12",
+            interval_minutes="120",
             retention_count="10",
             offsite_directory=str(tmp_path / "offsite"),
         )
@@ -281,3 +281,49 @@ def test_restore_sqlite_backup_replaces_database_and_keeps_safety_backup(tmp_pat
     assert safety_marker == "current"
     assert restore.safety_backup_path.exists()
     assert restore_source.exists() is False
+
+
+def test_backup_defaults_run_every_30_minutes_and_keep_two(monkeypatch):
+    for key in (*backup_service.BACKUP_ENV_KEYS, *backup_service.LEGACY_BACKUP_ENV_KEYS):
+        monkeypatch.delenv(key, raising=False)
+    get_settings.cache_clear()
+    try:
+        assert get_settings().backup_interval_minutes == 30
+        assert get_settings().backup_retention_count == 2
+    finally:
+        get_settings.cache_clear()
+
+
+def test_saving_backup_settings_drops_legacy_hours_line(tmp_path, monkeypatch):
+    for key in backup_service.BACKUP_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("SECRET_KEY=keep\nBACKUP_INTERVAL_HOURS=24\n", encoding="utf-8")
+    monkeypatch.setattr(backup_service, "ENV_FILE", env_file)
+    get_settings.cache_clear()
+
+    backup_service.update_backup_settings(
+        enabled=True,
+        backup_directory=str(tmp_path / "backups"),
+        interval_minutes="30",
+        retention_count="2",
+        offsite_directory="",
+    )
+
+    env_text = env_file.read_text(encoding="utf-8")
+    assert "BACKUP_INTERVAL_HOURS" not in env_text
+    assert "BACKUP_INTERVAL_MINUTES=30" in env_text
+    assert "SECRET_KEY=keep" in env_text
+    get_settings.cache_clear()
+
+
+def test_backup_schedule_rejects_intervals_under_five_minutes(tmp_path, monkeypatch):
+    monkeypatch.setattr(backup_service, "ENV_FILE", tmp_path / ".env")
+    with pytest.raises(ValueError, match="between 5 and 10080"):
+        backup_service.update_backup_settings(
+            enabled=True,
+            backup_directory=str(tmp_path / "backups"),
+            interval_minutes="4",
+            retention_count="2",
+            offsite_directory="",
+        )

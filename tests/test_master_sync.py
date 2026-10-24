@@ -1156,6 +1156,7 @@ def test_command_poll_accepts_master_response_wrapper_and_uses_exact_ack_body(
             master_sync.poll_master_commands(db_session, opener=opener)
         assert db_session.scalar(select(MasterInboxCommand)).status == MasterInboxStatus.APPLIED.value
     assert master_sync.poll_master_commands(db_session, opener=opener) == 1
+    assert calls[0].get_header("X-setuora-command-types") == "PRODUCT_UPSERT"
     assert [request.get_method() for request in calls] == ["GET", "PATCH"] * (
         2 if lose_first_ack else 1
     )

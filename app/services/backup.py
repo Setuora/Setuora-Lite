@@ -24,9 +24,11 @@ BACKUP_ENV_KEYS = (
     "AUTOMATIC_BACKUPS_ENABLED",
     "BACKUP_DIRECTORY",
     "BACKUP_OFFSITE_DIRECTORY",
-    "BACKUP_INTERVAL_HOURS",
+    "BACKUP_INTERVAL_MINUTES",
     "BACKUP_RETENTION_COUNT",
 )
+# Replaced by BACKUP_INTERVAL_MINUTES; dropped from the settings file on save.
+LEGACY_BACKUP_ENV_KEYS = ("BACKUP_INTERVAL_HOURS",)
 BACKUP_FILE_PATTERNS = ("setuora-backup-*.db", "setu-backup-*.db")
 _SQLITE_FILE_MAINTENANCE_LOCK = threading.RLock()
 
@@ -50,7 +52,7 @@ class BackupFileInfo:
 class BackupStatus:
     enabled: bool
     directory: Path
-    interval_hours: int
+    interval_minutes: int
     retention_count: int
     latest_backup: Path | None
     latest_backup_size_bytes: int | None
@@ -166,10 +168,10 @@ def create_scheduled_backup() -> BackupFileInfo:
         temp_destination.replace(destination)
 
         offsite_path = _copy_to_offsite(destination, filename, settings)
-        _prune_backups(backup_dir, getattr(settings, "backup_retention_count", 14))
+        _prune_backups(backup_dir, getattr(settings, "backup_retention_count", 2))
         offsite_dir = getattr(settings, "backup_offsite_directory", "").strip()
         if offsite_dir:
-            _prune_backups(resolve_configured_path(offsite_dir), getattr(settings, "backup_retention_count", 14))
+            _prune_backups(resolve_configured_path(offsite_dir), getattr(settings, "backup_retention_count", 2))
 
         return BackupFileInfo(
             filename=filename,
@@ -184,7 +186,7 @@ def update_backup_settings(
     *,
     enabled: bool,
     backup_directory: str,
-    interval_hours: str,
+    interval_minutes: str,
     retention_count: str,
     offsite_directory: str,
 ) -> BackupStatus:
@@ -193,7 +195,7 @@ def update_backup_settings(
     if not directory:
         raise ValueError("Backup folder is required.")
 
-    interval = _positive_int(interval_hours, "Schedule", minimum=1, maximum=168)
+    interval = _positive_int(interval_minutes, "Schedule", minimum=5, maximum=10080)
     retention = _positive_int(retention_count, "Retention", minimum=1, maximum=365)
 
     backup_dir = resolve_configured_path(directory)
@@ -236,7 +238,7 @@ def update_backup_settings(
             "AUTOMATIC_BACKUPS_ENABLED": "true" if enabled else "false",
             "BACKUP_DIRECTORY": directory,
             "BACKUP_OFFSITE_DIRECTORY": offsite,
-            "BACKUP_INTERVAL_HOURS": str(interval),
+            "BACKUP_INTERVAL_MINUTES": str(interval),
             "BACKUP_RETENTION_COUNT": str(retention),
         }
     )
@@ -255,8 +257,8 @@ def backup_status() -> BackupStatus:
     return BackupStatus(
         enabled=getattr(settings, "automatic_backups_enabled", True),
         directory=backup_dir,
-        interval_hours=max(1, int(getattr(settings, "backup_interval_hours", 24))),
-        retention_count=max(1, int(getattr(settings, "backup_retention_count", 14))),
+        interval_minutes=max(1, int(getattr(settings, "backup_interval_minutes", 30))),
+        retention_count=max(1, int(getattr(settings, "backup_retention_count", 2))),
         latest_backup=latest,
         latest_backup_size_bytes=latest.stat().st_size if latest and latest.exists() else None,
         offsite_directory=offsite_dir,
@@ -390,6 +392,8 @@ def _persist_env_values(values: dict[str, str]) -> None:
 
     for raw_line in lines:
         key = _env_line_key(raw_line)
+        if key in LEGACY_BACKUP_ENV_KEYS:
+            continue
         if key in values:
             output.append(f"{key}={_format_env_value(values[key])}")
             seen.add(key)

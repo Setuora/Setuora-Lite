@@ -169,7 +169,7 @@ def _environment_issues(
     if values.get("AUTOMATIC_BACKUPS_ENABLED", "true").strip().lower() != "true":
         issues.append("AUTOMATIC_BACKUPS_ENABLED must be true for production.")
     try:
-        retention = int(values.get("BACKUP_RETENTION_COUNT", "14"))
+        retention = int(values.get("BACKUP_RETENTION_COUNT", "2"))
     except ValueError:
         retention = 0
     if retention < 2:

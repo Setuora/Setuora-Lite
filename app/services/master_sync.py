@@ -38,6 +38,8 @@ from app.models import (
 )
 
 EVENT_SCHEMA_VERSION = 1
+PRODUCT_UPSERT_COMMAND = "PRODUCT_UPSERT"
+OPT_IN_COMMAND_TYPES = (PRODUCT_UPSERT_COMMAND,)
 COMMAND_SCHEMA_VERSION = 1
 INITIAL_INVENTORY_AGGREGATE_TYPE = "INITIAL_INVENTORY"
 INITIAL_INVENTORY_REFERENCE_SEGMENT = "INITIAL-INVENTORY"
@@ -1118,7 +1120,11 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
         # Local import avoids a module cycle: transfer event creation uses the
         # generic outbox helper above.
         from app.services.receipts import apply_receipt_review_command
-        from app.services.master_qr import apply_qr_allocated_command, apply_qr_replace_command
+        from app.services.master_qr import (
+            apply_product_upsert_command,
+            apply_qr_allocated_command,
+            apply_qr_replace_command,
+        )
         from app.services.transfer import (
             apply_transfer_available_command,
             apply_transfer_receipt_command,
@@ -1134,6 +1140,8 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
             apply_qr_allocated_command(db, payload)
         elif command_type == "QR_REPLACE":
             apply_qr_replace_command(db, payload, command_id)
+        elif command_type == PRODUCT_UPSERT_COMMAND:
+            apply_product_upsert_command(db, payload)
         else:
             raise MasterSyncError(f"Unsupported Master command type: {command_type}.")
     except Exception as exc:
@@ -1203,6 +1211,8 @@ def poll_master_commands(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
+            # Master withholds opt-in command types from Lites that omit them.
+            "X-Setuora-Command-Types": ",".join(OPT_IN_COMMAND_TYPES),
         },
     )
     try:

@@ -91,7 +91,7 @@ async def save_backup_settings(
     request: Request,
     automatic_backups_enabled: str = Form("false"),
     backup_directory: str = Form(...),
-    backup_interval_hours: str = Form(...),
+    backup_interval_minutes: str = Form(...),
     backup_retention_count: str = Form(...),
     backup_offsite_directory: str = Form(""),
     db: Session = Depends(get_db),
@@ -101,7 +101,7 @@ async def save_backup_settings(
         status = update_backup_settings(
             enabled=automatic_backups_enabled == "true",
             backup_directory=backup_directory,
-            interval_hours=backup_interval_hours,
+            interval_minutes=backup_interval_minutes,
             retention_count=backup_retention_count,
             offsite_directory=backup_offsite_directory,
         )

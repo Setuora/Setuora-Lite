@@ -199,3 +199,60 @@ def test_lite_creation_services_and_routes_are_blocked(db_session, monkeypatch):
         replacements.replace_qr(_request("/qr-replacement"), db=db_session)
     assert all(exc.value.status_code == 403 for exc in (single, bulk, product_route, replace_route))
     assert db_session.scalar(select(func.count(Serial.id))) == 0
+
+
+def _product_payload(**product):
+    payload = _payload()
+    payload.pop("serials")
+    payload["product"].update(product)
+    return payload
+
+
+def test_product_upsert_creates_then_updates_identity_and_keeps_lite_pricing(db_session, monkeypatch):
+    _setup(monkeypatch)
+
+    master_sync.apply_master_command(db_session, _command("product-1", _product_payload(), "PRODUCT_UPSERT"))
+    db_session.commit()
+    product = db_session.scalar(select(Product))
+    assert (product.product_code, product.default_rate, product.sales_discount_rate) == ("P-01", 125, 2)
+    product.default_rate = 140
+    db_session.commit()
+
+    renamed = _product_payload(
+        product_name="Example Product v2",
+        tally_stock_item_name="Example Product v2",
+        hsn="1006",
+        gst_rate=12,
+        unit="Nos",
+        default_rate=999,
+    )
+    master_sync.apply_master_command(db_session, _command("product-2", renamed, "PRODUCT_UPSERT"))
+    db_session.commit()
+
+    db_session.refresh(product)
+    assert db_session.scalar(select(func.count(Product.id))) == 1
+    assert (product.product_name, product.tally_stock_item_name) == ("Example Product v2", "Example Product v2")
+    assert (product.hsn, product.gst_rate, product.unit) == ("1006", 12, "Nos")
+    assert product.default_rate == 140
+
+    # A later QR allocation carrying the synced identity applies cleanly.
+    allocation = _payload("SQR-" + "D" * 32)
+    allocation["product"].update(renamed["product"])
+    master_sync.apply_master_command(db_session, _command("allocate-after-sync", allocation))
+    db_session.commit()
+    assert db_session.scalar(select(Serial)).product_id == product.id
+
+
+def test_product_upsert_rejects_wrong_franchise_and_bad_values(db_session, monkeypatch):
+    _setup(monkeypatch)
+    wrong = _product_payload()
+    wrong["franchise_code"] = "OTHER"
+    with pytest.raises(MasterSyncError, match="different franchise"):
+        master_sync.apply_master_command(db_session, _command("product-wrong", wrong, "PRODUCT_UPSERT"))
+    db_session.rollback()
+    with pytest.raises(MasterSyncError, match="GST rate"):
+        master_sync.apply_master_command(
+            db_session, _command("product-gst", _product_payload(gst_rate=101), "PRODUCT_UPSERT")
+        )
+    db_session.rollback()
+    assert db_session.scalar(select(func.count(Product.id))) == 0

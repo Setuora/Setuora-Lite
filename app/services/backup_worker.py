@@ -35,7 +35,7 @@ async def backup_worker_loop() -> None:
         except Exception:
             logger.exception("Scheduled backup failed")
         settings = get_settings()
-        interval_seconds = max(60, int(getattr(settings, "backup_interval_hours", 24)) * 60 * 60)
+        interval_seconds = max(60, int(getattr(settings, "backup_interval_minutes", 30)) * 60)
         await asyncio.sleep(interval_seconds)
 
 

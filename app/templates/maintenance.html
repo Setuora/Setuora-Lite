@@ -21,7 +21,7 @@
     <dt>Format</dt><dd>SQLite database copy</dd>
     <dt>Automatic backups</dt><dd>{{ 'Enabled' if backup_status.enabled else 'Disabled' }}</dd>
     <dt>Backup folder</dt><dd>{{ backup_status.directory }}</dd>
-    <dt>Schedule</dt><dd>Every {{ backup_status.interval_hours }} hour{{ '' if backup_status.interval_hours == 1 else 's' }}</dd>
+    <dt>Schedule</dt><dd>Every {{ backup_status.interval_minutes }} minute{{ '' if backup_status.interval_minutes == 1 else 's' }}</dd>
     <dt>Retention</dt><dd>Last {{ backup_status.retention_count }} verified backup{{ '' if backup_status.retention_count == 1 else 's' }}</dd>
     <dt>Latest backup</dt><dd>{{ backup_status.latest_backup or 'Not created yet' }}</dd>
     <dt>Off-machine copy</dt><dd>{{ backup_status.offsite_directory or 'Not configured' }}</dd>
@@ -55,8 +55,8 @@
         <input name="backup_offsite_directory" value="{{ backup_config.backup_offsite_directory }}" placeholder="Drive path or network share">
       </label>
       {% endif %}
-      <label>Schedule
-        <input name="backup_interval_hours" type="number" min="1" max="168" step="1" value="{{ backup_config.backup_interval_hours }}" required>
+      <label>Schedule (minutes)
+        <input name="backup_interval_minutes" type="number" min="5" max="10080" step="1" value="{{ backup_config.backup_interval_minutes }}" required>
       </label>
       <label>Retention
         <input name="backup_retention_count" type="number" min="1" max="365" step="1" value="{{ backup_config.backup_retention_count }}" required>

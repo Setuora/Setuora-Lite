@@ -235,3 +235,53 @@ def apply_qr_replace_command(db: Session, payload: dict[str, Any], command_id: s
             "items": [network_event_item(old_serial), network_event_item(replacement)],
         },
     )
+
+
+def apply_product_upsert_command(db: Session, payload: dict[str, Any]) -> Product:
+    """Create or update a product that Master imported or live-synced from Tally.
+
+    Master owns product identity, so its name, Tally names, HSN, unit and GST
+    replace Lite's. Lite keeps its own pricing once the product exists.
+    """
+
+    if type(payload.get("version")) is not int or payload["version"] != 1:
+        raise MasterSyncError("Unsupported Master product version.")
+    if payload.get("franchise_code") != configured_franchise_code(required=True):
+        raise MasterSyncError("Master product is addressed to a different franchise.")
+    data = payload.get("product")
+    if not isinstance(data, dict):
+        raise MasterSyncError("Master product command is missing product details.")
+    product_code = _text(data.get("product_code"), "product code", 80)
+    identity = {
+        "product_name": _text(data.get("product_name"), "product name", 180),
+        "tally_stock_item_name": _text(data.get("tally_stock_item_name"), "Tally stock item", 180),
+        "alternate_tally_stock_item_name": _optional_text(
+            data.get("alternate_tally_stock_item_name"), "alternate Tally stock item", 180
+        ),
+        "hsn": _text(data.get("hsn"), "HSN", 40, allow_empty=True),
+        "gst_rate": _rate(data.get("gst_rate"), "GST rate", 100),
+        "unit": _text(data.get("unit", "Pcs"), "unit", 40),
+    }
+    default_rate = _rate(data.get("default_rate", 0), "default rate")
+    sales_discount_rate = _rate(data.get("sales_discount_rate", 0), "sales discount rate", 100)
+
+    matching = db.scalars(
+        select(Product).where(func.upper(Product.product_code) == product_code.upper()).limit(2)
+    ).all()
+    if len(matching) > 1:
+        raise MasterSyncError(f"Multiple Lite products match Master code {product_code}.")
+    product = matching[0] if matching else None
+    if product is None:
+        product = Product(
+            product_code=product_code,
+            default_rate=default_rate,
+            sales_discount_rate=sales_discount_rate,
+            active=data.get("active", True) is True,
+            **identity,
+        )
+        db.add(product)
+    else:
+        for name, value in identity.items():
+            setattr(product, name, value)
+    db.flush()
+    return product
