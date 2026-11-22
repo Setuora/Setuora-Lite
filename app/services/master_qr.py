@@ -283,5 +283,8 @@ def apply_product_upsert_command(db: Session, payload: dict[str, Any]) -> Produc
     else:
         for name, value in identity.items():
             setattr(product, name, value)
+        if not product.default_rate and default_rate:
+            # Take Master's price only while Lite has none of its own.
+            product.default_rate = default_rate
     db.flush()
     return product

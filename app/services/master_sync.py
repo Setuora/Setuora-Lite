@@ -39,7 +39,8 @@ from app.models import (
 
 EVENT_SCHEMA_VERSION = 1
 PRODUCT_UPSERT_COMMAND = "PRODUCT_UPSERT"
-OPT_IN_COMMAND_TYPES = (PRODUCT_UPSERT_COMMAND,)
+TALLY_RECEIPTS_COMMAND = "TALLY_RECEIPTS"
+OPT_IN_COMMAND_TYPES = (PRODUCT_UPSERT_COMMAND, TALLY_RECEIPTS_COMMAND)
 COMMAND_SCHEMA_VERSION = 1
 INITIAL_INVENTORY_AGGREGATE_TYPE = "INITIAL_INVENTORY"
 INITIAL_INVENTORY_REFERENCE_SEGMENT = "INITIAL-INVENTORY"
@@ -1130,6 +1131,7 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
         # Local import avoids a module cycle: transfer event creation uses the
         # generic outbox helper above.
         from app.services.receipts import apply_receipt_review_command
+        from app.services.master_receipts import apply_tally_receipts_command
         from app.services.master_qr import (
             apply_product_upsert_command,
             apply_qr_allocated_command,
@@ -1152,6 +1154,8 @@ def apply_master_command(db: Session, command: dict[str, Any]) -> MasterInboxCom
             apply_qr_replace_command(db, payload, command_id)
         elif command_type == PRODUCT_UPSERT_COMMAND:
             apply_product_upsert_command(db, payload)
+        elif command_type == TALLY_RECEIPTS_COMMAND:
+            apply_tally_receipts_command(db, payload)
         else:
             raise MasterSyncError(f"Unsupported Master command type: {command_type}.")
     except Exception as exc:

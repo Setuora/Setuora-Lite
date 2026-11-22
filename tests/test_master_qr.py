@@ -256,3 +256,77 @@ def test_product_upsert_rejects_wrong_franchise_and_bad_values(db_session, monke
         )
     db_session.rollback()
     assert db_session.scalar(select(func.count(Product.id))) == 0
+
+
+def _receipts_payload(**overrides):
+    receipt = {
+        "tally_guid": "guid-1",
+        "voucher_type": "Chinatamani Reciepts",
+        "voucher_number": "1",
+        "voucher_date": "2026-11-13",
+        "bank_ledger": "CASH",
+        "total_amount": "3000.00",
+        "narration": "",
+        "lines": [{"ledger_name": "TEST CUSTOMER 9000000001", "amount": "3000.00"}],
+    }
+    receipt.update(overrides)
+    return {
+        "franchise_code": "BLR-01",
+        "ledgers": [{"name": line["ledger_name"]} for line in receipt["lines"]],
+        "receipts": [receipt],
+    }
+
+
+def test_tally_receipts_store_once_and_offer_customers_as_sale_parties(db_session, monkeypatch):
+    from app.models import BatchType, MasterTallyReceipt
+    from app.routers.batches import party_ledger_options
+
+    _setup(monkeypatch)
+    assert "TALLY_RECEIPTS" in master_sync.OPT_IN_COMMAND_TYPES
+    master_sync.apply_master_command(db_session, _command("receipts-1", _receipts_payload(), "TALLY_RECEIPTS"))
+    db_session.commit()
+    changed = _receipts_payload(total_amount="3500.00", lines=[{"ledger_name": "TEST CUSTOMER 9000000001", "amount": "3500"}])
+    master_sync.apply_master_command(db_session, _command("receipts-2", changed, "TALLY_RECEIPTS"))
+    db_session.commit()
+
+    rows = db_session.scalars(select(MasterTallyReceipt)).all()
+    assert [(row.tally_guid, row.total_amount) for row in rows] == [("guid-1", "3500.00")]
+    assert "TEST CUSTOMER 9000000001" in party_ledger_options(db_session, BatchType.SALE)
+    assert "TEST CUSTOMER 9000000001" not in party_ledger_options(db_session, BatchType.PURCHASE)
+
+
+def test_tally_receipts_reject_wrong_franchise_and_bad_receipts(db_session, monkeypatch):
+    from app.models import MasterTallyReceipt
+
+    _setup(monkeypatch)
+    wrong = _receipts_payload()
+    wrong["franchise_code"] = "OTHER"
+    with pytest.raises(MasterSyncError, match="different franchise"):
+        master_sync.apply_master_command(db_session, _command("receipts-wrong", wrong, "TALLY_RECEIPTS"))
+    db_session.rollback()
+    with pytest.raises(MasterSyncError, match="date"):
+        master_sync.apply_master_command(
+            db_session, _command("receipts-date", _receipts_payload(voucher_date="13-11-2026"), "TALLY_RECEIPTS")
+        )
+    db_session.rollback()
+    assert db_session.scalar(select(func.count(MasterTallyReceipt.id))) == 0
+
+
+def test_product_upsert_fills_price_only_while_lite_has_none(db_session, monkeypatch):
+    _setup(monkeypatch)
+    master_sync.apply_master_command(
+        db_session, _command("price-0", _product_payload(default_rate=0), "PRODUCT_UPSERT")
+    )
+    db_session.commit()
+    master_sync.apply_master_command(
+        db_session, _command("price-1", _product_payload(default_rate=61.9), "PRODUCT_UPSERT")
+    )
+    db_session.commit()
+    product = db_session.scalar(select(Product))
+    assert product.default_rate == 61.9
+    master_sync.apply_master_command(
+        db_session, _command("price-2", _product_payload(default_rate=99), "PRODUCT_UPSERT")
+    )
+    db_session.commit()
+    db_session.refresh(product)
+    assert product.default_rate == 61.9

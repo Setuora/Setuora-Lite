@@ -49,6 +49,7 @@ from app.services.inventory import (
     update_batch_item_rate,
     update_product_rate_in_batch,
 )
+from app.services.master_receipts import receipt_ledger_names
 from app.services.master_sync import enqueue_batch_submitted_event
 from app.services.preinvoice import sale_preinvoice_pdf
 from app.services.relocation import find_location_by_code
@@ -345,6 +346,9 @@ def party_ledger_options(db: Session, batch_type: BatchType, user=None) -> list[
         .order_by(Batch.party_name)
     ).all()
     names = {name.strip() for name in rows if name and name.strip()}
+    if batch_type in {BatchType.SALE, BatchType.SALES_RETURN}:
+        # Customers whose Tally receipts Master sent to this franchise.
+        names.update(receipt_ledger_names(db))
 
     active_company = get_active_company(db)
     if active_company:
