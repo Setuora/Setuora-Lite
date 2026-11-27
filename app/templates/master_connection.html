@@ -120,6 +120,27 @@
     </table>
   </div>
 </section>
+<section class="panel">
+  <div class="section-title"><div><h2>Tally receipts</h2><p class="muted">Receipts Master read from central Tally for this franchise. Their customers appear as debtor ledgers when you bill a sale.</p></div></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th class="cell-date">Date</th><th>Voucher</th><th>Customers</th><th class="numeric">Amount</th><th>Paid into</th></tr></thead>
+      <tbody>
+        {% for receipt in tally_receipts %}
+        <tr>
+          <td class="cell-date">{{ receipt.voucher_date.strftime('%d-%m-%Y') }}</td>
+          <td>{{ receipt.voucher_type }} {{ receipt.voucher_number }}</td>
+          <td class="cell-wrap">{% for line in receipt.lines %}{{ line.ledger_name }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+          <td class="numeric">{{ receipt.total_amount }}</td>
+          <td>{{ receipt.bank_ledger or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No Tally receipts have been received yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endif %}
 <script src="/static/password-toggle.js?v=20260624-expiry-1"></script>
 <script nonce="{{ csp_nonce(request) }}">

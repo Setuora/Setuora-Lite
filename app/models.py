@@ -636,6 +636,37 @@ class MasterOutboxEvent(Base):
         return json.loads(self.payload_json)
 
 
+class MasterTallyReceipt(Base):
+    """A franchise receipt voucher that Master read from central Tally.
+
+    Its customer ledgers are offered as debtor ledgers when billing a sale.
+    """
+
+    __tablename__ = "master_tally_receipts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tally_guid: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    voucher_type: Mapped[str] = mapped_column(String(120), default="")
+    voucher_number: Mapped[str] = mapped_column(String(80), default="")
+    voucher_date: Mapped[date] = mapped_column(Date, index=True)
+    bank_ledger: Mapped[str] = mapped_column(String(220), default="")
+    total_amount: Mapped[str] = mapped_column(String(40), default="0")
+    narration: Mapped[str] = mapped_column(Text, default="")
+    lines_json: Mapped[str] = mapped_column(Text, default="[]")
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    @property
+    def lines(self) -> list[dict[str, str]]:
+        try:
+            value = json.loads(self.lines_json or "[]")
+        except (TypeError, ValueError):
+            return []
+        return value if isinstance(value, list) else []
+
+
 class MasterInboxCommand(Base):
     """A durable idempotency record for a command received from Master."""
 

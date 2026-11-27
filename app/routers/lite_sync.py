@@ -34,6 +34,7 @@ from app.models import (
     Setting,
     utc_now,
 )
+from app.services.master_receipts import recent_receipts
 from app.services.master_sync import (
     MasterSyncError,
     enqueue_initial_inventory_snapshot,
@@ -201,6 +202,7 @@ def master_connection_page(request: Request, db: Session = Depends(get_db)):
             "counts": counts,
             "command_count": command_count,
             "recent_events": recent_events,
+            "tally_receipts": recent_receipts(db),
             "oldest_unsent": oldest_unsent,
             "initialized": initialized,
             "connection_state": connection_state,
