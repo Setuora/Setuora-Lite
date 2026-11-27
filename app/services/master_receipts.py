@@ -70,7 +70,12 @@ def _receipt_fields(item: Any) -> dict[str, Any]:
         "voucher_date": voucher_date,
         "bank_ledger": _text(item.get("bank_ledger"), "bank ledger", 220),
         "total_amount": _amount(item.get("total_amount", "0"), "total"),
-        "narration": _text(item.get("narration"), "narration", 2000),
+        # Only shown on screen: a long Tally narration is shortened, not a reason to refuse the command.
+        "narration": _text(
+            narration[:2000] if isinstance(narration := item.get("narration"), str) else narration,
+            "narration",
+            2000,
+        ),
         "lines_json": json.dumps(lines, ensure_ascii=False),
     }
 

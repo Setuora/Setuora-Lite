@@ -295,6 +295,16 @@ def test_tally_receipts_store_once_and_offer_customers_as_sale_parties(db_sessio
     assert "TEST CUSTOMER 9000000001" not in party_ledger_options(db_session, BatchType.PURCHASE)
 
 
+def test_tally_receipt_long_narration_is_shortened_not_refused(db_session, monkeypatch):
+    from app.models import MasterTallyReceipt
+
+    _setup(monkeypatch)
+    payload = _receipts_payload(narration="x" * 2500)
+    master_sync.apply_master_command(db_session, _command("receipts-long", payload, "TALLY_RECEIPTS"))
+    db_session.commit()
+    assert len(db_session.scalar(select(MasterTallyReceipt.narration))) == 2000
+
+
 def test_tally_receipts_reject_wrong_franchise_and_bad_receipts(db_session, monkeypatch):
     from app.models import MasterTallyReceipt
 
