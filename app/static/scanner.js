@@ -476,14 +476,20 @@ function resultText(result) {
   return cleanDecodedText(text);
 }
 
+// Master issues "SQR-" + 32 hex QR serials (e.g. Tally opening stock); Lite's own end in -digits.
+// Master's form is matched first: the Lite pattern would cut "SQR-262A..." down to "SQR-262".
+const MASTER_SERIAL = /SQR-[0-9A-F]{32}/i;
+const LITE_SERIAL = /[A-Z0-9][A-Z0-9_-]{0,64}-\d{3,}/i;
+
 function cleanDecodedText(text) {
   const value = String(text || "").trim();
-  const serial = value.match(/[A-Z0-9][A-Z0-9_-]{0,64}-\d{3,}/i);
+  const serial = value.match(MASTER_SERIAL) || value.match(LITE_SERIAL);
   return (serial ? serial[0] : value).replace(/\s+/g, "").toUpperCase();
 }
 
 function looksLikeSerial(text) {
-  return /^[A-Z0-9][A-Z0-9_-]{0,64}-\d{3,}$/.test(cleanDecodedText(text));
+  const serial = cleanDecodedText(text);
+  return /^SQR-[0-9A-F]{32}$/.test(serial) || /^[A-Z0-9][A-Z0-9_-]{0,64}-\d{3,}$/.test(serial);
 }
 
 const scanCanvas = document.createElement("canvas");
